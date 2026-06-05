@@ -1,6 +1,4 @@
-import json
-import anthropic
-from backend.config import settings
+from backend.pipeline.llm import chat, parse_json
 
 FIT_PROMPT = """\
 You are a strategic business analyst at Infomerics Valuation and Rating Pvt. Ltd. (also called ACER), \
@@ -70,12 +68,8 @@ def _label(score: int) -> str:
 
 
 async def analyze_fit(company: dict, credit_data: dict) -> dict:
-    """Call Claude to produce a fit analysis for the given company."""
-    api_key = settings.anthropic_api_key
-    if not api_key or api_key == "your_key_here":
-        return _mock_analysis(company, credit_data)
-
-    agencies = credit_data.get("agencies", [])
+    """Call OpenRouter free LLM to produce a fit analysis for the given company."""
+    agencies       = credit_data.get("agencies", [])
     rating_summary = _build_rating_summary(agencies)
     rated_by_count = credit_data.get("rated_by_count", 0)
 
@@ -89,23 +83,14 @@ async def analyze_fit(company: dict, credit_data: dict) -> dict:
         rated_by_count=rated_by_count,
     )
 
-    try:
-        client = anthropic.AsyncAnthropic(api_key=api_key)
-        message = await client.messages.create(
-            model="claude-sonnet-4-20250514",
-            max_tokens=600,
-            messages=[{"role": "user", "content": prompt}],
-        )
-        raw = message.content[0].text.strip()
-        if raw.startswith("```"):
-            raw = raw.split("```")[1]
-            if raw.startswith("json"):
-                raw = raw[4:]
-        parsed = json.loads(raw)
+    raw    = await chat(prompt, max_tokens=600)
+    parsed = parse_json(raw) if raw else None
+
+    if parsed:
         parsed["fit_label"] = _label(int(parsed.get("fit_score", 50)))
         return parsed
-    except Exception as e:
-        return _mock_analysis(company, credit_data)
+
+    return _mock_analysis(company, credit_data)
 
 
 def _mock_analysis(company: dict, credit_data: dict) -> dict:
