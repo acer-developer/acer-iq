@@ -7,10 +7,16 @@ OVERPASS_URL  = "https://overpass-api.de/api/interpreter"
 
 _HEADERS = {"User-Agent": "CredSight/2.0 (credit-rating-lead-tool; contact@acerratings.com)"}
 
+_ENTITY_LABEL: dict[str, str] = {
+    "Banks":      "Bank",
+    "NBFCs":      "NBFC",
+    "Corporates": "Corporate",
+    "All":        "Financial Entity",
+}
+
 # ── Geocoding ────────────────────────────────────────────────────────────────
 
 async def _geocode(location: str) -> tuple[float, float]:
-    """Geocode a city or 6-digit pincode in India via Nominatim."""
     try:
         async with httpx.AsyncClient(timeout=8, headers=_HEADERS) as client:
             resp = await client.get(NOMINATIM, params={
@@ -24,78 +30,83 @@ async def _geocode(location: str) -> tuple[float, float]:
                 return float(results[0]["lat"]), float(results[0]["lon"])
     except Exception:
         pass
-    return 20.5937, 78.9629   # India centre fallback
+    return 20.5937, 78.9629
 
-# ── OpenStreetMap / Overpass API (real data, no API key) ─────────────────────
 
-# Overpass filter tags per entity type
-_OVERPASS_TAGS = {
-    "Banks": [
-        '["amenity"="bank"]',
-    ],
-    "NBFCs": [
-        '["office"~"financial|moneylender|insurance|microfinance"]',
-        '["amenity"~"microfinance|money_transfer"]',
-    ],
-    "Corporates": [
-        '["office"~"company|commercial|government|ngo"]',
-    ],
-    "All": [
-        '["amenity"="bank"]',
-        '["office"~"financial|company|commercial|moneylender|insurance"]',
-    ],
-}
+# ── Overpass (real OSM data) ─────────────────────────────────────────────────
 
-_ENTITY_LABEL: dict[str, str] = {
-    "Banks":      "Bank",
-    "NBFCs":      "NBFC",
-    "Corporates": "Corporate",
-    "All":        "Financial Entity",
+# For ALL entity types, we search for financial institutions broadly.
+# OSM tags banks well. For NBFCs/Corporates, we search banks + offices + known name patterns.
+_OVERPASS_QUERIES = {
+    "Banks": """
+  node["amenity"="bank"](around:{r},{lat},{lng});
+  way["amenity"="bank"](around:{r},{lat},{lng});
+""",
+    "NBFCs": """
+  node["amenity"="bank"](around:{r},{lat},{lng});
+  way["amenity"="bank"](around:{r},{lat},{lng});
+  node["office"~"financial|insurance"](around:{r},{lat},{lng});
+  way["office"~"financial|insurance"](around:{r},{lat},{lng});
+  node["name"~"finance|NBFC|capital|housing|micro|leasing|credit",i](around:{r},{lat},{lng});
+  way["name"~"finance|NBFC|capital|housing|micro|leasing|credit",i](around:{r},{lat},{lng});
+""",
+    "Corporates": """
+  node["amenity"="bank"](around:{r},{lat},{lng});
+  way["amenity"="bank"](around:{r},{lat},{lng});
+  node["office"~"financial|company|commercial|insurance"](around:{r},{lat},{lng});
+  way["office"~"financial|company|commercial|insurance"](around:{r},{lat},{lng});
+  node["name"~"ltd|limited|pvt|private|corporation|holdings|group",i]["name"](around:{r},{lat},{lng});
+  way["name"~"ltd|limited|pvt|private|corporation|holdings|group",i]["name"](around:{r},{lat},{lng});
+""",
+    "All": """
+  node["amenity"="bank"](around:{r},{lat},{lng});
+  way["amenity"="bank"](around:{r},{lat},{lng});
+  node["office"~"financial|company|commercial|insurance"](around:{r},{lat},{lng});
+  way["office"~"financial|company|commercial|insurance"](around:{r},{lat},{lng});
+""",
 }
 
 
 def _entity_from_tags(tags: dict, fallback: str) -> str:
     amenity = tags.get("amenity", "")
     office  = tags.get("office", "")
+    name    = tags.get("name", "").lower()
+
     if amenity == "bank":
         return "Bank"
-    if office in ("financial", "moneylender", "insurance", "microfinance"):
+    if office in ("financial", "insurance", "moneylender"):
         return "NBFC"
-    if office in ("company", "commercial", "government", "ngo"):
+    if any(w in name for w in ("finance", "capital", "nbfc", "housing finance",
+                                "micro", "leasing", "credit")):
+        return "NBFC"
+    if office in ("company", "commercial"):
+        return "Corporate"
+    if any(w in name for w in ("ltd", "limited", "pvt", "corporation", "holdings")):
         return "Corporate"
     return fallback
 
 
-def _address_from_tags(tags: dict, city: str) -> str:
+def _address_from_tags(tags: dict) -> str:
     parts = []
     for key in ("addr:housename", "addr:housenumber", "addr:street",
                 "addr:suburb", "addr:city", "addr:state"):
         v = tags.get(key, "").strip()
         if v:
             parts.append(v)
-    return ", ".join(parts) if parts else city
+    return ", ".join(parts)
 
 
 async def _overpass_search(lat: float, lng: float,
                            entity_type: str, radius_m: int = 15000) -> list[dict]:
-    """Query Overpass API for real financial entities within radius of a point."""
-    tags_list = _OVERPASS_TAGS.get(entity_type, _OVERPASS_TAGS["All"])
+    """Query Overpass API for real financial entities near a point."""
     entity_label = _ENTITY_LABEL.get(entity_type, "Financial Entity")
+    body = _OVERPASS_QUERIES.get(entity_type, _OVERPASS_QUERIES["All"])
+    body = body.format(r=radius_m, lat=lat, lng=lng)
 
-    # Build union of node + way queries
-    parts = []
-    for tag in tags_list:
-        parts.append(f'  node{tag}(around:{radius_m},{lat},{lng});')
-        parts.append(f'  way{tag}(around:{radius_m},{lat},{lng});')
-
-    query = f"""[out:json][timeout:20];
-(
-{chr(10).join(parts)}
-);
-out center 15;"""
+    query = f"[out:json][timeout:25];\n(\n{body}\n);\nout center 25;"
 
     try:
-        async with httpx.AsyncClient(timeout=20, headers=_HEADERS) as client:
+        async with httpx.AsyncClient(timeout=25, headers=_HEADERS) as client:
             resp = await client.post(OVERPASS_URL, data={"data": query})
             data = resp.json()
     except Exception:
@@ -122,7 +133,7 @@ out center 15;"""
         companies.append({
             "id":          f"osm_{el['id']}",
             "name":        name,
-            "address":     _address_from_tags(tags, ""),
+            "address":     _address_from_tags(tags),
             "lat":         clat,
             "lng":         clng,
             "website":     tags.get("website", tags.get("url", "")),
@@ -130,28 +141,20 @@ out center 15;"""
             "entity_type": _entity_from_tags(tags, entity_label),
         })
 
-        if len(companies) >= 10:
+        if len(companies) >= 15:
             break
 
     return companies
 
-# ── Google Places API ────────────────────────────────────────────────────────
 
-_ENTITY_QUERIES: dict[str, str] = {
-    "Banks":      "scheduled commercial bank private sector bank",
+# ── Google Places path ───────────────────────────────────────────────────────
+
+_GPLACES_QUERIES = {
+    "Banks":      "bank scheduled commercial bank",
     "NBFCs":      "NBFC non banking financial company housing finance",
     "Corporates": "corporate company head office listed company",
     "All":        "bank NBFC financial company corporate",
 }
-
-_INSTRUMENT_HINT: dict[str, str] = {
-    "NCD":  "NCD debentures",
-    "Bond": "bond issuer",
-    "IPO":  "IPO listed",
-    "Debt": "debt financing",
-    "All":  "",
-}
-
 
 def _is_pincode(location: str) -> bool:
     return location.strip().isdigit() and len(location.strip()) == 6
@@ -167,72 +170,54 @@ async def discover_companies(
 ) -> tuple[list[dict], float, float]:
     """
     Find financial entities in a city/pincode.
-    Uses Google Places if API key is set, otherwise falls back to
-    OpenStreetMap Overpass API (real data, no hallucination, no key needed).
+    Primary: Overpass API (real OSM data).
+    Fallback: Google Places if API key is set.
+    NEVER returns fake/mock data.
     """
-    # Geocode first — always needed
     lat, lng = await _geocode(city)
 
+    # Try Overpass first (free, real data)
+    companies = await _overpass_search(lat, lng, entity_type)
+
+    # If Overpass returned results, we're done
+    if companies:
+        return companies, lat, lng
+
+    # Try wider radius
+    companies = await _overpass_search(lat, lng, entity_type, radius_m=30000)
+    if companies:
+        return companies, lat, lng
+
+    # Google Places fallback (if key is configured)
     api_key = settings.google_places_api_key
-    if not api_key or api_key == "your_key_here":
-        # ── OpenStreetMap path ────────────────────────────────────────────
-        companies = await _overpass_search(lat, lng, entity_type)
-        return companies, lat, lng
+    if api_key and api_key != "your_key_here":
+        location_term = f"pincode {city}" if _is_pincode(city) else city
+        base_query    = _GPLACES_QUERIES.get(entity_type, _GPLACES_QUERIES["All"])
+        query         = f"{base_query} in {location_term} India"
+        entity_label  = _ENTITY_LABEL.get(entity_type, "Financial Entity")
 
-    # ── Google Places path ───────────────────────────────────────────────
-    location_term = f"pincode {city}" if _is_pincode(city) else city
-    base_query    = _ENTITY_QUERIES.get(entity_type, _ENTITY_QUERIES["All"])
-    hint          = _INSTRUMENT_HINT.get(instrument_type, "")
-    query         = f"{base_query} {hint} in {location_term} India".strip()
-    entity_label  = _ENTITY_LABEL.get(entity_type, "Financial Entity")
+        try:
+            async with httpx.AsyncClient(timeout=20) as client:
+                resp = await client.get(
+                    f"{PLACES_BASE}/textsearch/json",
+                    params={"query": query, "key": api_key,
+                            "type": "establishment", "region": "in"},
+                )
+                results = resp.json().get("results", [])[:10]
+                for idx, place in enumerate(results):
+                    loc = place.get("geometry", {}).get("location", {})
+                    companies.append({
+                        "id":          place.get("place_id", f"place_{idx}"),
+                        "name":        place.get("name", "Unknown"),
+                        "address":     place.get("formatted_address", ""),
+                        "lat":         loc.get("lat", lat),
+                        "lng":         loc.get("lng", lng),
+                        "website":     "",
+                        "phone":       "",
+                        "entity_type": entity_label,
+                    })
+        except Exception:
+            pass
 
-    try:
-        async with httpx.AsyncClient(timeout=20) as client:
-            resp = await client.get(
-                f"{PLACES_BASE}/textsearch/json",
-                params={"query": query, "key": api_key,
-                        "type": "establishment", "region": "in"},
-            )
-            data = resp.json()
-
-        results = data.get("results", [])[:10]
-        if not results:
-            # Fallback to Overpass if Places returns nothing
-            companies = await _overpass_search(lat, lng, entity_type)
-            return companies, lat, lng
-
-        companies = []
-        for idx, place in enumerate(results):
-            loc = place.get("geometry", {}).get("location", {})
-            companies.append({
-                "id":          place.get("place_id", f"place_{idx}"),
-                "name":        place.get("name", "Unknown"),
-                "address":     place.get("formatted_address", ""),
-                "lat":         loc.get("lat", lat),
-                "lng":         loc.get("lng", lng),
-                "website":     "",
-                "phone":       "",
-                "entity_type": entity_label,
-            })
-
-        # Enrich with website / phone
-        async with httpx.AsyncClient(timeout=20) as client:
-            for c in companies:
-                try:
-                    det = await client.get(
-                        f"{PLACES_BASE}/details/json",
-                        params={"place_id": c["id"],
-                                "fields": "website,formatted_phone_number",
-                                "key": api_key},
-                    )
-                    detail = det.json().get("result", {})
-                    c["website"] = detail.get("website", "")
-                    c["phone"]   = detail.get("formatted_phone_number", "")
-                except Exception:
-                    pass
-
-        return companies, lat, lng
-
-    except Exception:
-        companies = await _overpass_search(lat, lng, entity_type)
-        return companies, lat, lng
+    # Return whatever we found (may be empty — frontend handles gracefully)
+    return companies, lat, lng

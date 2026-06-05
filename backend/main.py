@@ -59,9 +59,10 @@ async def search_leads(req: SearchRequest):
         req.city, industry, entity_type, instrument_type
     )
     if not raw_companies:
-        raise HTTPException(
-            status_code=404,
-            detail=f"No companies found in {req.city} for {entity_type}",
+        # Return empty result with city coordinates so map still zooms
+        return SearchResponse(
+            companies=[], city_lat=city_lat, city_lng=city_lng,
+            search_id=str(uuid.uuid4()),
         )
 
     # Enrich contacts — safe, returns companies with empty contacts on failure
