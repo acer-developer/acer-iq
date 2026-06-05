@@ -1,0 +1,12 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "lead-gen-frontend",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev"],
+      "cwd": "C:\\Users\\Dell\\Desktop\\Claude\\lead-gen-tool\\frontend",
+      "port": 5173
+    }
+  ]
+}
