@@ -4,6 +4,7 @@ import MapView from "./components/MapView.jsx";
 import Sidebar from "./components/Sidebar.jsx";
 import CompanyCard from "./components/CompanyCard.jsx";
 import CompanyResearchPage from "./components/company/CompanyResearchPage.jsx";
+import { apiUrl } from "./lib/api.js";
 
 const MAPS_API_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY ?? "";
 
@@ -70,7 +71,7 @@ export default function App() {
     setSearchInstrument(instrumentType);
 
     try {
-      const res = await fetch("/api/search", {
+      const res = await fetch(apiUrl("/api/search"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

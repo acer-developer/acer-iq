@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from "react";
+import { apiUrl } from "../../lib/api.js";
 
 // ── Autocomplete search box ───────────────────────────────────────────────────
 function CompanySearchInput({ onSearch, loading }) {
@@ -18,7 +19,7 @@ function CompanySearchInput({ onSearch, loading }) {
     debounce.current = setTimeout(async () => {
       setSugLoading(true);
       try {
-        const r = await fetch(`/api/company-suggest?q=${encodeURIComponent(query.trim())}`);
+        const r = await fetch(apiUrl(`/api/company-suggest?q=${encodeURIComponent(query.trim())}`));
         const d = await r.json();
         setSuggestions(d.suggestions ?? []);
         setOpen(true);
@@ -407,7 +408,7 @@ export default function CompanyResearchPage() {
     setError("");
     setResult(null);
     try {
-      const res = await fetch("/api/company-credit", {
+      const res = await fetch(apiUrl("/api/company-credit"), {
         method:  "POST",
         headers: { "Content-Type": "application/json" },
         body:    JSON.stringify({ query }),
