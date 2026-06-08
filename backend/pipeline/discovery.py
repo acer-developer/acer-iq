@@ -11,6 +11,24 @@ _ENTITY_LABEL = {
     "Banks": "Bank", "NBFCs": "NBFC", "Corporates": "Corporate", "All": "Financial Entity",
 }
 
+# ── Major national/commercial banks — already rated by all agencies, not leads ─
+# Only cooperative banks, small finance banks, RRBs, UCBs are worth targeting
+_LARGE_BANKS_BLOCKLIST = {
+    "state bank of india", "sbi", "hdfc bank", "icici bank", "axis bank",
+    "kotak mahindra bank", "kotak bank", "punjab national bank", "pnb",
+    "bank of baroda", "canara bank", "union bank of india", "union bank",
+    "bank of india", "central bank of india", "indian bank", "indian overseas bank",
+    "uco bank", "bank of maharashtra", "punjab & sind bank", "punjab and sind bank",
+    "yes bank", "indusind bank", "federal bank", "south indian bank",
+    "karnataka bank", "karur vysya bank", "city union bank", "dcb bank",
+    "rbl bank", "bandhan bank", "idfc first bank", "idfc bank",
+    "jammu and kashmir bank", "j&k bank", "nainital bank",
+    "tamilnad mercantile bank", "lakshmi vilas bank", "dhanlaxmi bank",
+    "hsbc", "citibank", "standard chartered", "deutsche bank", "barclays",
+    "american express", "dbs bank", "abu dhabi commercial bank",
+    "rajasthan marudhara gramin bank",  # example RRBs that are already well-rated
+}
+
 # ── Hardcoded coords for major Indian cities ──────────────────────────────────
 _CITY_COORDS: dict[str, tuple[float, float]] = {
     "mumbai": (19.0760, 72.8777), "delhi": (28.6139, 77.2090),
@@ -157,12 +175,14 @@ def _build_overpass_query(lat: float, lng: float, entity_type: str, radius: int)
     drowning out NBFCs and Corporates in mixed results."""
 
     if entity_type == "Banks":
+        # Target cooperative banks, small finance banks, RRBs, UCBs
+        # NOT large commercial banks (SBI, HDFC etc.) — they're already covered by all agencies
         return f"""[out:json][timeout:30];
 (
-  node["amenity"="bank"](around:{radius},{lat},{lng});
-  way["amenity"="bank"](around:{radius},{lat},{lng});
-  node["name"~"Gramin Bank|Sahakari Bank|Co-operative Bank|Urban Bank|Rural Bank",i]["name"](around:{radius},{lat},{lng});
-  way["name"~"Gramin Bank|Sahakari Bank|Co-operative Bank|Urban Bank|Rural Bank",i]["name"](around:{radius},{lat},{lng});
+  node["name"~"Gramin Bank|Sahakari Bank|Co-operative Bank|Cooperative Bank|Urban Co-op|Urban Cooperative|Small Finance Bank|Nagrik Bank|Nagarik Bank|Janata Bank|Lokvikas Bank|Mahila Bank",i]["name"](around:{radius},{lat},{lng});
+  way["name"~"Gramin Bank|Sahakari Bank|Co-operative Bank|Cooperative Bank|Urban Co-op|Urban Cooperative|Small Finance Bank|Nagrik Bank|Nagarik Bank|Janata Bank|Lokvikas Bank|Mahila Bank",i]["name"](around:{radius},{lat},{lng});
+  node["amenity"="bank"]["name"~"Gramin|Sahakari|Co-op|Cooperative|Nagrik|Nagarik|Janata|Mahila|Small Finance",i](around:{radius},{lat},{lng});
+  way["amenity"="bank"]["name"~"Gramin|Sahakari|Co-op|Cooperative|Nagrik|Nagarik|Janata|Mahila|Small Finance",i](around:{radius},{lat},{lng});
 );
 out center 60;"""
 
@@ -236,6 +256,20 @@ async def _overpass_search(lat: float, lng: float, entity_type: str,
             continue
         if entity_type == "Corporates" and entity != "Corporate":
             continue
+
+        # Skip large national/commercial banks — already rated by all agencies
+        # ACER targets: cooperative banks, small finance banks, RRBs, UCBs
+        if entity == "Bank":
+            if any(bl in name_lower for bl in _LARGE_BANKS_BLOCKLIST):
+                continue
+            # Also skip if it's clearly a branch of a major bank
+            major_bank_keywords = (
+                "sbi ", "hdfc ", "icici ", "axis ", "kotak ", "pnb ",
+                "canara ", "union bank", "bank of baroda", "bank of india",
+                "yes bank", "indusind", "federal bank",
+            )
+            if any(name_lower.startswith(kw) for kw in major_bank_keywords):
+                continue
 
         seen.add(name_lower)
 
