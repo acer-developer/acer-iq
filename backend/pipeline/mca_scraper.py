@@ -1,15 +1,15 @@
 """
 Company master data — CIN, directors, incorporation date, registered address.
 
-Source priority:
-1. BSE Equity company master  — instant, free, no auth, works for listed companies
-2. BSE Debt company search    — for debt-only issuers not in equity segment
-3. Zauba Corp scrape          — fallback for unlisted / private companies
+Source chain:
+1. BSE equity search → CorpInfo endpoint  (CIN in Table3.fld_cin, directors in Table,
+                                            address in Table1 — fast, reliable, no auth)
+2. BSE debt search → CorpInfo             (same flow for debt-only NBFC issuers)
+3. Zauba Corp direct scrape               (unlisted / private companies)
 """
 
 import re
 import httpx
-from bs4 import BeautifulSoup
 
 _BSE_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -20,35 +20,95 @@ _BSE_HEADERS = {
 }
 
 _WEB_HEADERS = {
-    "User-Agent": (
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-        "AppleWebKit/537.36 (KHTML, like Gecko) "
-        "Chrome/124.0.0.0 Safari/537.36"
-    ),
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                  "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
     "Accept-Language": "en-US,en;q=0.9",
 }
 
+_CIN_RE = re.compile(r"^[LU]\d{5}[A-Z]{2}\d{4}[A-Z]{3}\d{6}$")
 
-# ── Source 1: BSE Equity company master ───────────────────────────────────────
 
-async def _bse_equity_cin(company_name: str) -> dict:
+# ── BSE CorpInfo — returns CIN, directors, address ────────────────────────────
+
+async def _bse_corp_info(scrip_code: str) -> dict:
     """
-    Search BSE equity segment by name → get scrip code → fetch company master
-    which includes CIN, registered address, incorporation date.
-    Works for all BSE equity-listed companies (most large banks, NBFCs, corporates).
+    Call BSE CorpInfo endpoint for a known scrip code.
+    Returns dict with cin, directors, registered_address, incorporation_date.
     """
     try:
         async with httpx.AsyncClient(timeout=10, headers=_BSE_HEADERS) as client:
-            # Step 1: search equity by name
-            search = await client.get(
+            r = await client.get(
+                "https://api.bseindia.com/BseIndiaAPI/api/CorpInfo/w",
+                params={"scripcode": scrip_code},
+            )
+            if r.status_code != 200:
+                return {}
+
+            d = r.json()
+
+            # ── Table3 — CIN, Industry, Listing date ─────────────────────────
+            t3 = d.get("Table3", [{}])
+            row3 = t3[0] if isinstance(t3, list) and t3 else {}
+            cin  = row3.get("fld_cin", "").strip()
+
+            # ── Table1 — Registered address ──────────────────────────────────
+            t1   = d.get("Table1", [{}])
+            row1 = t1[0] if isinstance(t1, list) and t1 else {}
+            addr_parts = [
+                row1.get("Address", ""),
+                row1.get("City", ""),
+                row1.get("State", ""),
+            ]
+            address = ", ".join(p for p in addr_parts if p).strip()
+
+            # ── Table — Directors ─────────────────────────────────────────────
+            directors = []
+            for dr in (d.get("Table") or [])[:10]:
+                first = (dr.get("sFirstname") or "").strip()
+                last  = (dr.get("sLastname")  or "").strip()
+                name  = f"{first} {last}".strip()
+                if not name:
+                    continue
+                directors.append({
+                    "name":        name,
+                    "din":         dr.get("sDIN", ""),
+                    "designation": (dr.get("sDesignation") or "Director").strip(),
+                    "linkedin_url": (
+                        "https://www.linkedin.com/search/results/people/"
+                        f"?keywords={name.replace(' ', '+')}"
+                    ),
+                })
+
+            # ── Table3 — Listing date as incorporation proxy ─────────────────
+            listing_raw = row3.get("lISTING_DATE", "")
+            inc_date    = listing_raw[:10] if listing_raw else ""
+
+            if cin:
+                return {
+                    "cin":                cin,
+                    "incorporation_date": inc_date,
+                    "registered_address": address,
+                    "directors":          directors,
+                }
+    except Exception:
+        pass
+    return {}
+
+
+# ── BSE equity search → scrip code → CorpInfo ────────────────────────────────
+
+async def _bse_equity_cin(company_name: str) -> dict:
+    """Search BSE equity segment by name to get scrip code, then fetch CorpInfo."""
+    try:
+        async with httpx.AsyncClient(timeout=10, headers=_BSE_HEADERS) as client:
+            r = await client.get(
                 "https://api.bseindia.com/BseIndiaAPI/api/SearchData/w",
                 params={"strText": company_name, "flag": "0",
                         "Membertype": "S", "pageno": "1", "tab": "EQ"},
             )
-            if search.status_code != 200:
+            if r.status_code != 200:
                 return {}
-
-            rows = (search.json().get("Table") or [])
+            rows = r.json().get("Table") or []
             if not rows:
                 return {}
 
@@ -57,91 +117,68 @@ async def _bse_equity_cin(company_name: str) -> dict:
             ).strip()
             if not scrip_code:
                 return {}
-
-            # Step 2: fetch company master data
-            detail = await client.get(
-                "https://api.bseindia.com/BseIndiaAPI/api/CompanyInfoFulData/w",
-                params={"scripcd": scrip_code},
-            )
-            if detail.status_code != 200:
-                return {}
-
-            d = detail.json()
-            # BSE returns a flat object with varying key names
-            cin  = (d.get("CIN") or d.get("cin") or "").strip()
-            addr = (d.get("RegisteredOffice") or d.get("Registered_Office")
-                    or d.get("Address") or "").strip()
-            inc  = (d.get("DateOfIncorporation") or d.get("Incorporation_Date")
-                    or d.get("IncorpDate") or "").strip()
-            name_bse = (d.get("CompanyName") or d.get("COMPANYNAME") or "").strip()
-
-            if cin:
-                return {
-                    "cin":                  cin,
-                    "incorporation_date":   _fmt_date(inc),
-                    "registered_address":   addr,
-                    "directors":            [],   # BSE master doesn't include directors
-                    "name":                 name_bse,
-                }
     except Exception:
-        pass
-    return {}
+        return {}
+
+    return await _bse_corp_info(scrip_code)
 
 
-# ── Source 2: BSE Debt company info ───────────────────────────────────────────
+# ── BSE debt search → scrip code → CorpInfo ──────────────────────────────────
 
 async def _bse_debt_cin(company_name: str) -> dict:
-    """
-    Try BSE debt segment company info — covers NBFC/debt-only issuers
-    that may not have an equity listing.
-    """
+    """Search BSE debt segment — covers NBFC / debt-only issuers."""
     try:
         async with httpx.AsyncClient(timeout=10, headers=_BSE_HEADERS) as client:
-            search = await client.get(
+            r = await client.get(
                 "https://api.bseindia.com/BseIndiaAPI/api/SearchData/w",
                 params={"strText": company_name, "flag": "0",
                         "Membertype": "S", "pageno": "1", "tab": "DEBT"},
             )
-            if search.status_code != 200:
+            if r.status_code != 200:
                 return {}
-
-            rows = (search.json().get("Table") or [])
+            rows = r.json().get("Table") or []
             if not rows:
                 return {}
 
-            # Some debt rows carry CIN directly
-            cin = (rows[0].get("CIN") or rows[0].get("cin") or "").strip()
-            if cin:
+            # Debt rows sometimes carry CIN directly
+            direct_cin = (rows[0].get("CIN") or rows[0].get("cin") or "").strip()
+            if direct_cin and _CIN_RE.match(direct_cin):
                 return {
-                    "cin":                cin,
+                    "cin":                direct_cin,
                     "incorporation_date": "",
                     "registered_address": "",
                     "directors":          [],
-                    "name":               (rows[0].get("SCRIP_NAME") or
-                                           rows[0].get("CompanyName") or "").strip(),
                 }
+
+            # Otherwise use scrip code to fetch CorpInfo
+            scrip_code = str(
+                rows[0].get("SCRIP_CD") or rows[0].get("scripCd") or ""
+            ).strip()
+            if scrip_code:
+                return await _bse_corp_info(scrip_code)
     except Exception:
         pass
     return {}
 
 
-# ── Source 3: Zauba Corp scrape (fallback) ────────────────────────────────────
+# ── Zauba Corp scrape — fallback for unlisted/private companies ───────────────
 
 async def _zauba_cin(company_name: str) -> dict:
-    """Scrape Zauba Corp — covers unlisted / private companies."""
+    """Scrape Zauba Corp search page — works for unlisted/private companies."""
     try:
+        from bs4 import BeautifulSoup
         async with httpx.AsyncClient(
             timeout=15, headers=_WEB_HEADERS, follow_redirects=True
         ) as client:
-            search_resp = await client.get(
+            r = await client.get(
                 "https://www.zaubacorp.com/company-search",
                 params={"search": company_name},
             )
-            if search_resp.status_code != 200:
+            if r.status_code != 200:
                 return {}
 
-            soup  = BeautifulSoup(search_resp.text, "lxml")
-            rows  = soup.select("table tbody tr")
+            soup = BeautifulSoup(r.text, "lxml")
+            rows = soup.select("table tbody tr")
             if not rows:
                 return {}
 
@@ -150,15 +187,15 @@ async def _zauba_cin(company_name: str) -> dict:
                 return {}
 
             cin = cells[0].get_text(strip=True)
-            if not re.match(r'^[LU]\d{5}[A-Z]{2}\d{4}[A-Z]{3}\d{6}$', cin):
-                return {}   # Not a valid CIN pattern — skip
+            if not _CIN_RE.match(cin):
+                return {}
 
-            link_tag = cells[1].find("a")
-            if not link_tag:
+            link = cells[1].find("a")
+            if not link:
                 return {"cin": cin, "incorporation_date": "",
                         "registered_address": "", "directors": []}
 
-            url = link_tag.get("href", "")
+            url = link.get("href", "")
             if not url.startswith("http"):
                 url = f"https://www.zaubacorp.com{url}"
 
@@ -187,20 +224,17 @@ async def _zauba_cin(company_name: str) -> dict:
 
 async def fetch_mca_data(company_name: str) -> dict:
     """
-    Try BSE equity → BSE debt → Zauba Corp in order.
-    Returns empty dict on total failure — caller handles gracefully.
+    BSE equity → BSE debt → Zauba Corp fallback.
+    Returns empty dict on total failure.
     """
-    # 1. BSE Equity (fastest, most reliable for listed companies)
     result = await _bse_equity_cin(company_name)
     if result.get("cin"):
         return result
 
-    # 2. BSE Debt (for debt-only issuers)
     result = await _bse_debt_cin(company_name)
     if result.get("cin"):
         return result
 
-    # 3. Zauba Corp scrape (unlisted / private)
     result = await _zauba_cin(company_name)
     if result.get("cin"):
         return result
@@ -210,58 +244,35 @@ async def fetch_mca_data(company_name: str) -> dict:
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
-def _fmt_date(raw: str) -> str:
-    """Normalise BSE date formats like '19770101' or '1977-01-01' to '01 Jan 1977'."""
-    if not raw:
-        return ""
-    raw = raw.strip()
-    # Already readable
-    if len(raw) > 8 and not raw.isdigit():
-        return raw
-    # YYYYMMDD
-    if len(raw) == 8 and raw.isdigit():
-        try:
-            from datetime import datetime
-            return datetime.strptime(raw, "%Y%m%d").strftime("%d %b %Y")
-        except Exception:
-            return raw
-    return raw
-
-
-def _extract_label(soup: BeautifulSoup, label: str) -> str:
+def _extract_label(soup, label: str) -> str:
     try:
         tag = soup.find(string=lambda t: t and label.lower() in t.lower())
         if tag and tag.parent:
-            sibling = tag.parent.find_next_sibling()
-            if sibling:
-                return sibling.get_text(strip=True)
+            sib = tag.parent.find_next_sibling()
+            if sib:
+                return sib.get_text(strip=True)
     except Exception:
         pass
     return ""
 
 
-def _extract_directors(soup: BeautifulSoup) -> list[dict]:
+def _extract_directors(soup) -> list[dict]:
     directors = []
     try:
+        from bs4 import BeautifulSoup
         for table in soup.find_all("table"):
             headers = [th.get_text(strip=True).lower() for th in table.find_all("th")]
             if "din" in headers or "director" in " ".join(headers):
                 for row in table.find_all("tr")[1:]:
                     cells = row.find_all("td")
-                    if len(cells) >= 2:
-                        name        = cells[0].get_text(strip=True)
-                        din         = cells[1].get_text(strip=True) if len(cells) > 1 else ""
-                        designation = cells[2].get_text(strip=True) if len(cells) > 2 else "Director"
-                        if name:
-                            directors.append({
-                                "name":        name,
-                                "din":         din,
-                                "designation": designation,
-                                "linkedin_url": (
-                                    "https://www.linkedin.com/search/results/people/"
-                                    f"?keywords={name.replace(' ', '+')}"
-                                ),
-                            })
+                    name = cells[0].get_text(strip=True) if cells else ""
+                    din  = cells[1].get_text(strip=True) if len(cells) > 1 else ""
+                    desig = cells[2].get_text(strip=True) if len(cells) > 2 else "Director"
+                    if name:
+                        directors.append({
+                            "name": name, "din": din, "designation": desig,
+                            "linkedin_url": f"https://www.linkedin.com/search/results/people/?keywords={name.replace(' ', '+')}",
+                        })
     except Exception:
         pass
     return directors[:10]
