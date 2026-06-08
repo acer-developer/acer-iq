@@ -175,46 +175,51 @@ def _build_overpass_query(lat: float, lng: float, entity_type: str, radius: int)
     drowning out NBFCs and Corporates in mixed results."""
 
     if entity_type == "Banks":
-        # Target cooperative banks, small finance banks, RRBs, UCBs
-        # NOT large commercial banks (SBI, HDFC etc.) — they're already covered by all agencies
+        # Head offices of cooperative banks, small finance banks, RRBs, UCBs only.
+        # Using office=bank / office=financial tags which OSM uses for HQ-level entries,
+        # plus name-pattern search. Branches are tagged amenity=bank — we exclude those.
         return f"""[out:json][timeout:30];
 (
-  node["name"~"Gramin Bank|Sahakari Bank|Co-operative Bank|Cooperative Bank|Urban Co-op|Urban Cooperative|Small Finance Bank|Nagrik Bank|Nagarik Bank|Janata Bank|Lokvikas Bank|Mahila Bank",i]["name"](around:{radius},{lat},{lng});
-  way["name"~"Gramin Bank|Sahakari Bank|Co-operative Bank|Cooperative Bank|Urban Co-op|Urban Cooperative|Small Finance Bank|Nagrik Bank|Nagarik Bank|Janata Bank|Lokvikas Bank|Mahila Bank",i]["name"](around:{radius},{lat},{lng});
-  node["amenity"="bank"]["name"~"Gramin|Sahakari|Co-op|Cooperative|Nagrik|Nagarik|Janata|Mahila|Small Finance",i](around:{radius},{lat},{lng});
-  way["amenity"="bank"]["name"~"Gramin|Sahakari|Co-op|Cooperative|Nagrik|Nagarik|Janata|Mahila|Small Finance",i](around:{radius},{lat},{lng});
+  node["office"="bank"](around:{radius},{lat},{lng});
+  way["office"="bank"](around:{radius},{lat},{lng});
+  node["office"="financial"]["name"~"Bank",i](around:{radius},{lat},{lng});
+  way["office"="financial"]["name"~"Bank",i](around:{radius},{lat},{lng});
+  node["headquarters"="yes"]["amenity"="bank"](around:{radius},{lat},{lng});
+  way["headquarters"="yes"]["amenity"="bank"](around:{radius},{lat},{lng});
+  node["name"~"Gramin Bank|Sahakari Bank|Co-operative Bank|Cooperative Bank|Urban Co-op|Small Finance Bank|Nagrik Bank|Nagarik Bank|Janata Bank|Mahila Bank|Nagar Bank",i]["name"](around:{radius},{lat},{lng});
+  way["name"~"Gramin Bank|Sahakari Bank|Co-operative Bank|Cooperative Bank|Urban Co-op|Small Finance Bank|Nagrik Bank|Nagarik Bank|Janata Bank|Mahila Bank|Nagar Bank",i]["name"](around:{radius},{lat},{lng});
 );
 out center 60;"""
 
     elif entity_type == "NBFCs":
+        # office=financial tags in OSM are HQ-level; name patterns catch the rest
         return f"""[out:json][timeout:30];
 (
   node["office"~"financial|insurance|moneylender"](around:{radius},{lat},{lng});
   way["office"~"financial|insurance|moneylender"](around:{radius},{lat},{lng});
-  node["name"~"Finance|Capital|NBFC|Housing Finance|Microfinance|Micro Finance|Leasing|Fincorp|Finserv|Securities|Asset Management|Investment Fund",i]["name"](around:{radius},{lat},{lng});
-  way["name"~"Finance|Capital|NBFC|Housing Finance|Microfinance|Micro Finance|Leasing|Fincorp|Finserv|Securities|Asset Management|Investment Fund",i]["name"](around:{radius},{lat},{lng});
+  node["name"~"Finance Ltd|Finance Limited|Capital Ltd|Capital Limited|NBFC|Housing Finance|Microfinance|Micro Finance|Leasing|Fincorp|Finserv|Securities Ltd|Asset Management|Investment Fund",i]["name"](around:{radius},{lat},{lng});
+  way["name"~"Finance Ltd|Finance Limited|Capital Ltd|Capital Limited|NBFC|Housing Finance|Microfinance|Micro Finance|Leasing|Fincorp|Finserv|Securities Ltd|Asset Management|Investment Fund",i]["name"](around:{radius},{lat},{lng});
 );
 out center 60;"""
 
     elif entity_type == "Corporates":
+        # office=company in OSM is typically registered office / HQ
         return f"""[out:json][timeout:30];
 (
-  node["office"~"company|government"](around:{radius},{lat},{lng});
-  way["office"~"company|government"](around:{radius},{lat},{lng});
-  node["name"~"Limited|Industries|Infrastructure|Corporation|Holdings|Enterprises|Technologies|Power|Steel|Cement|Pharma|Energy|Chemicals|Textiles|Constructions",i]["name"](around:{radius},{lat},{lng});
-  way["name"~"Limited|Industries|Infrastructure|Corporation|Holdings|Enterprises|Technologies|Power|Steel|Cement|Pharma|Energy|Chemicals|Textiles|Constructions",i]["name"](around:{radius},{lat},{lng});
+  node["office"="company"](around:{radius},{lat},{lng});
+  way["office"="company"](around:{radius},{lat},{lng});
+  node["name"~"Industries Ltd|Industries Limited|Infrastructure Ltd|Corporation Ltd|Holdings Ltd|Enterprises Ltd|Technologies Ltd|Power Ltd|Steel Ltd|Cement Ltd|Pharma Ltd|Energy Ltd|Chemicals Ltd|Textiles Ltd|Constructions Ltd",i]["name"](around:{radius},{lat},{lng});
+  way["name"~"Industries Ltd|Industries Limited|Infrastructure Ltd|Corporation Ltd|Holdings Ltd|Enterprises Ltd|Technologies Ltd|Power Ltd|Steel Ltd|Cement Ltd|Pharma Ltd|Energy Ltd|Chemicals Ltd|Textiles Ltd|Constructions Ltd",i]["name"](around:{radius},{lat},{lng});
 );
 out center 60;"""
 
-    else:  # All — balanced mix, 20 each type
+    else:  # All — pull HQ-tagged offices across all types
         return f"""[out:json][timeout:30];
 (
-  node["amenity"="bank"](around:{radius},{lat},{lng});
-  way["amenity"="bank"](around:{radius},{lat},{lng});
-  node["office"~"financial|insurance|company"](around:{radius},{lat},{lng});
-  way["office"~"financial|insurance|company"](around:{radius},{lat},{lng});
-  node["name"~"Finance|Capital|NBFC|Housing|Industries|Infrastructure|Corporation|Holdings|Technologies",i]["name"](around:{radius},{lat},{lng});
-  way["name"~"Finance|Capital|NBFC|Housing|Industries|Infrastructure|Corporation|Holdings|Technologies",i]["name"](around:{radius},{lat},{lng});
+  node["office"~"bank|financial|insurance|company"](around:{radius},{lat},{lng});
+  way["office"~"bank|financial|insurance|company"](around:{radius},{lat},{lng});
+  node["name"~"Finance Ltd|Finance Limited|Capital Ltd|Industries Ltd|Infrastructure Ltd|Corporation Ltd|Holdings Ltd|Technologies Ltd|Gramin Bank|Sahakari Bank|Co-operative Bank|Small Finance Bank",i]["name"](around:{radius},{lat},{lng});
+  way["name"~"Finance Ltd|Finance Limited|Capital Ltd|Industries Ltd|Infrastructure Ltd|Corporation Ltd|Holdings Ltd|Technologies Ltd|Gramin Bank|Sahakari Bank|Co-operative Bank|Small Finance Bank",i]["name"](around:{radius},{lat},{lng});
 );
 out center 60;"""
 
@@ -242,9 +247,17 @@ async def _overpass_search(lat: float, lng: float, entity_type: str,
         if not name or name.lower() in seen:
             continue
 
-        # Skip ATMs and kiosks — not company headquarters
+        # Skip branches, ATMs, kiosks — we want head offices only
         name_lower = name.lower()
-        if any(skip in name_lower for skip in ("atm", "kiosk", "extension counter")):
+        _branch_indicators = (
+            " branch", " br.", " br ", "- branch", "– branch",
+            " atm", "kiosk", "extension counter", "extension office",
+            " regional office", " zonal office", " circle office",
+            " divisional office", " district office", " sub office",
+            " service branch", " main branch", " city branch",
+            " urban branch", " rural branch", " micro branch",
+        )
+        if any(ind in name_lower for ind in _branch_indicators):
             continue
 
         entity = _classify(tags, entity_label)
