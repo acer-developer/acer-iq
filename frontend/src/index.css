@@ -29,6 +29,46 @@ body {
   background: #94a3b8;
 }
 
+/* Leaflet zoom controls — styled for satellite/dark map */
+.leaflet-control-zoom {
+  border: none !important;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.35) !important;
+  border-radius: 8px !important;
+  overflow: hidden;
+}
+.leaflet-control-zoom a {
+  background: rgba(255,255,255,0.92) !important;
+  color: #1e293b !important;
+  border: none !important;
+  width: 32px !important;
+  height: 32px !important;
+  line-height: 32px !important;
+  font-size: 18px !important;
+  font-weight: 600 !important;
+  backdrop-filter: blur(4px);
+  transition: background 0.15s !important;
+}
+.leaflet-control-zoom a:hover {
+  background: #2563eb !important;
+  color: white !important;
+}
+.leaflet-control-zoom-in {
+  border-bottom: 1px solid #e5e7eb !important;
+}
+
+/* Leaflet popup */
+.leaflet-popup-content-wrapper {
+  border-radius: 10px !important;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.15) !important;
+  padding: 0 !important;
+}
+.leaflet-popup-content {
+  margin: 12px 14px !important;
+}
+.leaflet-popup-tip-container {
+  margin-top: -1px;
+}
+
 /* Skeleton shimmer — light theme */
 @keyframes shimmer {
   0% { background-position: -200% 0; }
