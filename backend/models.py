@@ -50,6 +50,9 @@ class Company(BaseModel):
     cin: str = ""
     incorporation_date: str = ""
     entity_type: str = ""
+    sub_type: str = ""           # e.g. Scheduled UCB, Small Finance Bank, MFI, HFC
+    layer: str = ""              # NBFC scale layer: Base / Middle / Upper
+    discovery_source: str = ""   # rbi_registry / osm / google_places
     directors: List[Director] = []
     contacts: List[Contact] = []
     past_instruments: List[PastInstrument] = []

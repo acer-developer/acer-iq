@@ -322,16 +322,35 @@ async def discover_companies(
 ) -> tuple[list[dict], float, float]:
     lat, lng = await _geocode(city)
 
-    companies = await _overpass_search(lat, lng, entity_type, radius=15000)
+    # ── Primary: RBI registry (complete universe of head offices) ────────────
+    # Banks → UCBs + SFBs; NBFCs → RBI-registered NBFCs/ARCs.
+    # Corporates are not in the registry yet (MCA ingest pending) — they still
+    # go through OSM/Places below.
+    from backend.registry import store as registry_store
+    companies: list[dict] = []
+    if entity_type in ("Banks", "NBFCs", "All"):
+        companies = registry_store.search(city, entity_type, limit=60)
 
-    # Widen search if fewer than 8 results found
-    if len(companies) < 8:
-        wider = await _overpass_search(lat, lng, entity_type, radius=30000)
-        seen_names = {c["name"].lower() for c in companies}
-        for c in wider:
-            if c["name"].lower() not in seen_names:
+    # ── Secondary: OSM/Places for Corporates (or registry miss) ─────────────
+    need_osm = (
+        entity_type == "Corporates"
+        or (entity_type == "All")
+        or not companies
+    )
+    if need_osm:
+        osm_type = "Corporates" if entity_type == "All" and companies else entity_type
+        osm = await _overpass_search(lat, lng, osm_type, radius=15000)
+        if len(companies) + len(osm) < 8:
+            wider = await _overpass_search(lat, lng, osm_type, radius=30000)
+            seen_osm = {c["name"].lower() for c in osm}
+            osm += [c for c in wider if c["name"].lower() not in seen_osm]
+
+        seen = {c["name"].lower() for c in companies}
+        for c in osm:
+            if c["name"].lower() not in seen:
+                c["discovery_source"] = "osm"
                 companies.append(c)
-                seen_names.add(c["name"].lower())
+                seen.add(c["name"].lower())
 
     # Google Places fallback if still empty
     if not companies:
@@ -339,7 +358,8 @@ async def discover_companies(
         if api_key and api_key not in ("your_key_here", ""):
             companies = await _google_places_search(city, entity_type, api_key, lat, lng)
 
-    return companies[:30], lat, lng
+    limit = 60 if any(c.get("discovery_source") == "rbi_registry" for c in companies) else 30
+    return companies[:limit], lat, lng
 
 
 async def _google_places_search(city, entity_type, api_key, lat, lng):

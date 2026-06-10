@@ -60,6 +60,27 @@ export default function App() {
 
   const selectedCompany = companies.find((c) => c.id === selectedId) ?? null;
   const activeOfficeLocations = selectedCompany?.office_locations ?? [];
+  const officesFetched = React.useRef(new Set());
+
+  // Branch offices are fetched on demand when a lead is selected —
+  // not in bulk during search (saves 60 Google Places calls per search)
+  const handleSelectCompany = (id) => {
+    setSelectedId(id);
+    setDetailOpen(true);
+    const comp = companies.find((c) => c.id === id);
+    if (!comp || comp.office_locations?.length || officesFetched.current.has(id)) return;
+    officesFetched.current.add(id);
+    fetch(apiUrl(`/api/offices/${encodeURIComponent(comp.name)}?lat=${comp.lat}&lng=${comp.lng}`))
+      .then((r) => (r.ok ? r.json() : { offices: [] }))
+      .then((d) => {
+        if (d.offices?.length) {
+          setCompanies((prev) =>
+            prev.map((c) => (c.id === id ? { ...c, office_locations: d.offices } : c))
+          );
+        }
+      })
+      .catch(() => {});
+  };
 
   const handleSearch = async (location, entityType, instrumentType) => {
     setLoading(true);
@@ -169,7 +190,7 @@ export default function App() {
                 companies={companies}
                 loading={loading}
                 selectedId={selectedId}
-                onSelectCompany={(id) => { setSelectedId(id); setDetailOpen(true); }}
+                onSelectCompany={handleSelectCompany}
                 searchId={searchId}
                 city={searchLocation}
                 industry={searchDesc}
@@ -182,7 +203,7 @@ export default function App() {
                 cityLat={cityLat}
                 cityLng={cityLng}
                 selectedId={selectedId}
-                onSelectCompany={(id) => { setSelectedId(id); setDetailOpen(true); }}
+                onSelectCompany={handleSelectCompany}
                 mapsApiKey={MAPS_API_KEY}
                 officeLocations={activeOfficeLocations}
               />

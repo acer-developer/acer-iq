@@ -89,6 +89,11 @@ export default function Sidebar({ companies, loading, selectedId, onSelectCompan
                         {company.entity_type}
                       </span>
                     )}
+                    {company.sub_type && (
+                      <span className="inline-flex rounded-full bg-gray-100 border border-gray-200 px-2 py-0.5 text-[10px] font-medium text-gray-600">
+                        {company.sub_type}{company.layer ? ` · ${company.layer}` : ""}
+                      </span>
+                    )}
                     <LeadScore label={company.score_label} score={company.score} />
                   </div>
                   <div className="mt-1 flex items-center gap-2">

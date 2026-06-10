@@ -60,10 +60,27 @@ def _rule_based_score(company: dict) -> dict:
         score += 20
         reasons.append("NBFCs are ACER's primary segment — strong NCD, CP and securitisation mandate potential")
         pain_points.append("NBFCs without multiple agency ratings face higher cost of institutional funds")
+        layer = company.get("registry_layer", "")
+        if layer in ("Upper", "Top"):
+            score += 12
+            reasons.append(f"RBI {layer}-layer NBFC — large regulated balance sheet, mandatory market borrowing programs")
+        elif layer == "Middle":
+            score += 7
+            reasons.append("RBI Middle-layer NBFC — sizeable book, active institutional funding needs")
+        if company.get("deposit_taking"):
+            score += 5
+            reasons.append("Deposit-taking NBFC — FD ratings required under RBI norms")
     elif entity == "Bank":
         score += 15
         reasons.append("Banks issue AT1 bonds, Tier-2 bonds and infrastructure bonds — require CRA ratings")
         pain_points.append("Regulatory requirements push banks to seek multiple agency opinions for large issuances")
+        sub = company.get("registry_sub_type", "")
+        if sub == "Scheduled UCB":
+            score += 8
+            reasons.append("Scheduled urban co-operative bank — Tier-2 bond and FD rating requirements, ACER's sweet spot")
+        elif sub == "Small Finance Bank":
+            score += 8
+            reasons.append("Small finance bank — regular Tier-2 and refinance instrument ratings needed")
     elif entity == "Corporate":
         score += 10
         reasons.append("Corporates increasingly prefer rated NCDs over bank loans for cost-efficient debt")
@@ -116,8 +133,9 @@ def _rule_based_score(company: dict) -> dict:
     # ── Incorporation age ─────────────────────────────────────────────────────
     if inc_date:
         try:
+            from datetime import date
             year = int(str(inc_date)[:4])
-            age  = 2025 - year
+            age  = date.today().year - year
             if age >= 15:
                 score += 8
                 reasons.append(f"Established company (incorporated {year}) — proven track record supports rating eligibility")

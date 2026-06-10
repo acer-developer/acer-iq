@@ -1,0 +1,5 @@
+# Only needed to (re)build the registry: python -m backend.registry.ingest
+# The server runtime does NOT need these — registry.sqlite is committed.
+httpx==0.28.1
+openpyxl==3.1.5
+pdfplumber==0.11.6

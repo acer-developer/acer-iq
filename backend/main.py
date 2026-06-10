@@ -72,37 +72,51 @@ async def search_leads(req: SearchRequest):
         for c in raw_companies:
             c.setdefault("contacts", [])
 
+    # Throttle enrichment so 60 leads don't mean 120+ concurrent BSE calls
+    _sem = asyncio.Semaphore(8)
+
     async def _enrich_one(c: dict) -> dict:
-        # MCA data
-        mca = await _safe(fetch_mca_data(c["name"]), {})
-        c.update({
-            "cin": mca.get("cin", ""),
-            "incorporation_date": mca.get("incorporation_date", ""),
-            "directors": mca.get("directors", []),
-        })
-        if not c.get("address") and mca.get("registered_address"):
-            c["address"] = mca["registered_address"]
+        async with _sem:
+            # MCA data — never overwrite registry values with blanks
+            mca = await _safe(fetch_mca_data(c["name"]), {})
+            c["cin"] = c.get("cin") or mca.get("cin", "")
+            c["incorporation_date"] = mca.get("incorporation_date", "")
+            c["directors"] = mca.get("directors", [])
+            if not c.get("address") and mca.get("registered_address"):
+                c["address"] = mca["registered_address"]
 
-        # BSE instruments
-        instruments = await _safe(fetch_past_instruments(c["name"]), [])
-        c["past_instruments"] = instruments
+            # Registry email (RBI-filed contact) becomes the first contact
+            if c.get("registry_email"):
+                contacts = c.get("contacts") or []
+                if not any(ct.get("email") == c["registry_email"] for ct in contacts):
+                    contacts.insert(0, {
+                        "name": "Registered contact",
+                        "email": c["registry_email"],
+                        "position": "RBI-filed email",
+                        "linkedin_url": "",
+                    })
+                c["contacts"] = contacts
 
-        # AI scoring
-        c = await _safe(
-            score_company(c, industry, req.city, c.get("entity_type", entity_type), instrument_type),
-            c,
-        )
-        c.setdefault("score", 0)
-        c.setdefault("score_label", "Pending")
-        c.setdefault("why_quality_lead", [])
-        c.setdefault("pain_points", [])
-        c.setdefault("recommended_approach", "")
+            # BSE instruments
+            instruments = await _safe(fetch_past_instruments(c["name"]), [])
+            c["past_instruments"] = instruments
 
-        # Office locations
-        offices = await _safe(find_office_locations(c["name"], c["lat"], c["lng"]), [])
-        c["office_locations"] = offices
+            # AI scoring
+            c = await _safe(
+                score_company(c, industry, req.city, c.get("entity_type", entity_type), instrument_type),
+                c,
+            )
+            c.setdefault("score", 0)
+            c.setdefault("score_label", "Pending")
+            c.setdefault("why_quality_lead", [])
+            c.setdefault("pain_points", [])
+            c.setdefault("recommended_approach", "")
 
-        return c
+            # Office locations: fetched on demand via /api/offices when a lead
+            # is selected — not in bulk (60 Google calls per search)
+            c["office_locations"] = []
+
+            return c
 
     enriched = await asyncio.gather(*[_enrich_one(c) for c in raw_companies])
 
@@ -131,6 +145,9 @@ async def search_leads(req: SearchRequest):
             cin=c.get("cin", ""),
             incorporation_date=c.get("incorporation_date", ""),
             entity_type=c.get("entity_type", entity_type),
+            sub_type=c.get("registry_sub_type", ""),
+            layer=c.get("registry_layer", ""),
+            discovery_source=c.get("discovery_source", ""),
             directors=directors,
             contacts=contacts,
             past_instruments=past_instruments,

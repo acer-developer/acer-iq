@@ -1,0 +1,285 @@
+{
+  "type": "excalidraw",
+  "version": 2,
+  "source": "https://excalidraw.com",
+  "elements": [
+    {
+      "id": "title", "type": "text", "x": 200, "y": 30, "width": 420, "height": 35,
+      "angle": 0, "strokeColor": "#1e1e1e", "backgroundColor": "transparent",
+      "fillStyle": "solid", "strokeWidth": 2, "strokeStyle": "solid", "roughness": 1,
+      "opacity": 100, "seed": 101, "version": 1, "versionNonce": 1, "isDeleted": false,
+      "groupIds": [], "frameId": null, "boundElements": [], "updated": 1, "link": null, "locked": false,
+      "text": "ACER-IQ — Next-level roadmap", "fontSize": 28, "fontFamily": 1,
+      "textAlign": "left", "verticalAlign": "top", "baseline": 25,
+      "containerId": null, "originalText": "ACER-IQ — Next-level roadmap", "lineHeight": 1.25
+    },
+
+    {
+      "id": "boxToday", "type": "rectangle", "x": 130, "y": 100, "width": 480, "height": 135,
+      "angle": 0, "strokeColor": "#e03131", "backgroundColor": "#ffc9c9",
+      "fillStyle": "solid", "strokeWidth": 2, "strokeStyle": "solid", "roughness": 1,
+      "opacity": 100, "seed": 102, "version": 1, "versionNonce": 2, "isDeleted": false,
+      "groupIds": [], "frameId": null, "boundElements": [], "updated": 1, "link": null, "locked": false,
+      "roundness": { "type": 3 }
+    },
+    {
+      "id": "txtTodayH", "type": "text", "x": 150, "y": 110, "width": 300, "height": 25,
+      "angle": 0, "strokeColor": "#1e1e1e", "backgroundColor": "transparent",
+      "fillStyle": "solid", "strokeWidth": 2, "strokeStyle": "solid", "roughness": 1,
+      "opacity": 100, "seed": 103, "version": 1, "versionNonce": 3, "isDeleted": false,
+      "groupIds": [], "frameId": null, "boundElements": [], "updated": 1, "link": null, "locked": false,
+      "text": "ACER-IQ today — pain points", "fontSize": 20, "fontFamily": 1,
+      "textAlign": "left", "verticalAlign": "top", "baseline": 18,
+      "containerId": null, "originalText": "ACER-IQ today — pain points", "lineHeight": 1.25
+    },
+    {
+      "id": "txtTodayB", "type": "text", "x": 150, "y": 140, "width": 440, "height": 80,
+      "angle": 0, "strokeColor": "#1e1e1e", "backgroundColor": "transparent",
+      "fillStyle": "solid", "strokeWidth": 2, "strokeStyle": "solid", "roughness": 1,
+      "opacity": 100, "seed": 104, "version": 1, "versionNonce": 4, "isDeleted": false,
+      "groupIds": [], "frameId": null, "boundElements": [], "updated": 1, "link": null, "locked": false,
+      "text": "• Discovery via OSM map-scraping — misses most NBFCs/corporates\n• Silent failures everywhere, zero logging\n• Thin BSE rating data shown as fact\n• No auth, no caching — quota burn + ban risk",
+      "fontSize": 14, "fontFamily": 1, "textAlign": "left", "verticalAlign": "top", "baseline": 12,
+      "containerId": null,
+      "originalText": "• Discovery via OSM map-scraping — misses most NBFCs/corporates\n• Silent failures everywhere, zero logging\n• Thin BSE rating data shown as fact\n• No auth, no caching — quota burn + ban risk",
+      "lineHeight": 1.25
+    },
+
+    {
+      "id": "ar1", "type": "arrow", "x": 370, "y": 240, "width": 0, "height": 40,
+      "angle": 0, "strokeColor": "#1e1e1e", "backgroundColor": "transparent",
+      "fillStyle": "solid", "strokeWidth": 2, "strokeStyle": "solid", "roughness": 1,
+      "opacity": 100, "seed": 105, "version": 1, "versionNonce": 5, "isDeleted": false,
+      "groupIds": [], "frameId": null, "boundElements": [], "updated": 1, "link": null, "locked": false,
+      "points": [[0, 0], [0, 40]], "lastCommittedPoint": null,
+      "startBinding": null, "endBinding": null, "startArrowhead": null, "endArrowhead": "arrow"
+    },
+
+    {
+      "id": "boxP1", "type": "rectangle", "x": 130, "y": 285, "width": 480, "height": 160,
+      "angle": 0, "strokeColor": "#6741d9", "backgroundColor": "#d0bfff",
+      "fillStyle": "solid", "strokeWidth": 2, "strokeStyle": "solid", "roughness": 1,
+      "opacity": 100, "seed": 106, "version": 1, "versionNonce": 6, "isDeleted": false,
+      "groupIds": [], "frameId": null, "boundElements": [], "updated": 1, "link": null, "locked": false,
+      "roundness": { "type": 3 }
+    },
+    {
+      "id": "txtP1H", "type": "text", "x": 150, "y": 295, "width": 440, "height": 25,
+      "angle": 0, "strokeColor": "#1e1e1e", "backgroundColor": "transparent",
+      "fillStyle": "solid", "strokeWidth": 2, "strokeStyle": "solid", "roughness": 1,
+      "opacity": 100, "seed": 107, "version": 1, "versionNonce": 7, "isDeleted": false,
+      "groupIds": [], "frameId": null, "boundElements": [], "updated": 1, "link": null, "locked": false,
+      "text": "Phase 1 — Registry-backed discovery  ← START", "fontSize": 20, "fontFamily": 1,
+      "textAlign": "left", "verticalAlign": "top", "baseline": 18,
+      "containerId": null, "originalText": "Phase 1 — Registry-backed discovery  ← START", "lineHeight": 1.25
+    },
+    {
+      "id": "txtP1B", "type": "text", "x": 150, "y": 325, "width": 440, "height": 105,
+      "angle": 0, "strokeColor": "#1e1e1e", "backgroundColor": "transparent",
+      "fillStyle": "solid", "strokeWidth": 2, "strokeStyle": "solid", "roughness": 1,
+      "opacity": 100, "seed": 108, "version": 1, "versionNonce": 8, "isDeleted": false,
+      "groupIds": [], "frameId": null, "boundElements": [], "updated": 1, "link": null, "locked": false,
+      "text": "• Ingest RBI NBFC list + RBI bank lists + MCA company master\n• companies table in Supabase/Postgres + refresh job\n• Geocode registered addresses once, at ingest\n• /api/search → instant DB query, complete universe\n• BSE / Zauba / Hunter demoted to on-demand enrichment",
+      "fontSize": 14, "fontFamily": 1, "textAlign": "left", "verticalAlign": "top", "baseline": 12,
+      "containerId": null,
+      "originalText": "• Ingest RBI NBFC list + RBI bank lists + MCA company master\n• companies table in Supabase/Postgres + refresh job\n• Geocode registered addresses once, at ingest\n• /api/search → instant DB query, complete universe\n• BSE / Zauba / Hunter demoted to on-demand enrichment",
+      "lineHeight": 1.25
+    },
+    {
+      "id": "noteP1", "type": "text", "x": 625, "y": 350, "width": 130, "height": 20,
+      "angle": 0, "strokeColor": "#868e96", "backgroundColor": "transparent",
+      "fillStyle": "solid", "strokeWidth": 2, "strokeStyle": "solid", "roughness": 1,
+      "opacity": 100, "seed": 109, "version": 1, "versionNonce": 9, "isDeleted": false,
+      "groupIds": [], "frameId": null, "boundElements": [], "updated": 1, "link": null, "locked": false,
+      "text": "fixes P1", "fontSize": 14, "fontFamily": 1,
+      "textAlign": "left", "verticalAlign": "top", "baseline": 12,
+      "containerId": null, "originalText": "fixes P1", "lineHeight": 1.25
+    },
+
+    {
+      "id": "ar2", "type": "arrow", "x": 370, "y": 450, "width": 0, "height": 40,
+      "angle": 0, "strokeColor": "#1e1e1e", "backgroundColor": "transparent",
+      "fillStyle": "solid", "strokeWidth": 2, "strokeStyle": "solid", "roughness": 1,
+      "opacity": 100, "seed": 110, "version": 1, "versionNonce": 10, "isDeleted": false,
+      "groupIds": [], "frameId": null, "boundElements": [], "updated": 1, "link": null, "locked": false,
+      "points": [[0, 0], [0, 40]], "lastCommittedPoint": null,
+      "startBinding": null, "endBinding": null, "startArrowhead": null, "endArrowhead": "arrow"
+    },
+
+    {
+      "id": "boxP2", "type": "rectangle", "x": 130, "y": 495, "width": 480, "height": 160,
+      "angle": 0, "strokeColor": "#1971c2", "backgroundColor": "#a5d8ff",
+      "fillStyle": "solid", "strokeWidth": 2, "strokeStyle": "solid", "roughness": 1,
+      "opacity": 100, "seed": 111, "version": 1, "versionNonce": 11, "isDeleted": false,
+      "groupIds": [], "frameId": null, "boundElements": [], "updated": 1, "link": null, "locked": false,
+      "roundness": { "type": 3 }
+    },
+    {
+      "id": "txtP2H", "type": "text", "x": 150, "y": 505, "width": 380, "height": 25,
+      "angle": 0, "strokeColor": "#1e1e1e", "backgroundColor": "transparent",
+      "fillStyle": "solid", "strokeWidth": 2, "strokeStyle": "solid", "roughness": 1,
+      "opacity": 100, "seed": 112, "version": 1, "versionNonce": 12, "isDeleted": false,
+      "groupIds": [], "frameId": null, "boundElements": [], "updated": 1, "link": null, "locked": false,
+      "text": "Phase 2 — Engineering hardening", "fontSize": 20, "fontFamily": 1,
+      "textAlign": "left", "verticalAlign": "top", "baseline": 18,
+      "containerId": null, "originalText": "Phase 2 — Engineering hardening", "lineHeight": 1.25
+    },
+    {
+      "id": "txtP2B", "type": "text", "x": 150, "y": 535, "width": 440, "height": 105,
+      "angle": 0, "strokeColor": "#1e1e1e", "backgroundColor": "transparent",
+      "fillStyle": "solid", "strokeWidth": 2, "strokeStyle": "solid", "roughness": 1,
+      "opacity": 100, "seed": 113, "version": 1, "versionNonce": 13, "isDeleted": false,
+      "groupIds": [], "frameId": null, "boundElements": [], "updated": 1, "link": null, "locked": false,
+      "text": "• Structured logging + per-source status badges in UI\n• Cache + rate-limit every external call (BSE, LLM, geocode)\n• Auth + locked CORS, all state in Postgres\n• Batch LLM scoring — 1 call per search, not 30\n• Fix known bugs (2025 hardcode, CIN search, branding) + CI tests",
+      "fontSize": 14, "fontFamily": 1, "textAlign": "left", "verticalAlign": "top", "baseline": 12,
+      "containerId": null,
+      "originalText": "• Structured logging + per-source status badges in UI\n• Cache + rate-limit every external call (BSE, LLM, geocode)\n• Auth + locked CORS, all state in Postgres\n• Batch LLM scoring — 1 call per search, not 30\n• Fix known bugs (2025 hardcode, CIN search, branding) + CI tests",
+      "lineHeight": 1.25
+    },
+    {
+      "id": "noteP2", "type": "text", "x": 625, "y": 560, "width": 160, "height": 20,
+      "angle": 0, "strokeColor": "#868e96", "backgroundColor": "transparent",
+      "fillStyle": "solid", "strokeWidth": 2, "strokeStyle": "solid", "roughness": 1,
+      "opacity": 100, "seed": 114, "version": 1, "versionNonce": 14, "isDeleted": false,
+      "groupIds": [], "frameId": null, "boundElements": [], "updated": 1, "link": null, "locked": false,
+      "text": "fixes P2 P4 P5 P6 P7", "fontSize": 14, "fontFamily": 1,
+      "textAlign": "left", "verticalAlign": "top", "baseline": 12,
+      "containerId": null, "originalText": "fixes P2 P4 P5 P6 P7", "lineHeight": 1.25
+    },
+
+    {
+      "id": "ar3", "type": "arrow", "x": 370, "y": 660, "width": 0, "height": 40,
+      "angle": 0, "strokeColor": "#1e1e1e", "backgroundColor": "transparent",
+      "fillStyle": "solid", "strokeWidth": 2, "strokeStyle": "solid", "roughness": 1,
+      "opacity": 100, "seed": 115, "version": 1, "versionNonce": 15, "isDeleted": false,
+      "groupIds": [], "frameId": null, "boundElements": [], "updated": 1, "link": null, "locked": false,
+      "points": [[0, 0], [0, 40]], "lastCommittedPoint": null,
+      "startBinding": null, "endBinding": null, "startArrowhead": null, "endArrowhead": "arrow"
+    },
+
+    {
+      "id": "boxP3", "type": "rectangle", "x": 130, "y": 705, "width": 480, "height": 145,
+      "angle": 0, "strokeColor": "#2f9e44", "backgroundColor": "#b2f2bb",
+      "fillStyle": "solid", "strokeWidth": 2, "strokeStyle": "solid", "roughness": 1,
+      "opacity": 100, "seed": 116, "version": 1, "versionNonce": 16, "isDeleted": false,
+      "groupIds": [], "frameId": null, "boundElements": [], "updated": 1, "link": null, "locked": false,
+      "roundness": { "type": 3 }
+    },
+    {
+      "id": "txtP3H", "type": "text", "x": 150, "y": 715, "width": 440, "height": 25,
+      "angle": 0, "strokeColor": "#1e1e1e", "backgroundColor": "transparent",
+      "fillStyle": "solid", "strokeWidth": 2, "strokeStyle": "solid", "roughness": 1,
+      "opacity": 100, "seed": 117, "version": 1, "versionNonce": 17, "isDeleted": false,
+      "groupIds": [], "frameId": null, "boundElements": [], "updated": 1, "link": null, "locked": false,
+      "text": "Phase 3 — Event-driven lead intelligence", "fontSize": 20, "fontFamily": 1,
+      "textAlign": "left", "verticalAlign": "top", "baseline": 18,
+      "containerId": null, "originalText": "Phase 3 — Event-driven lead intelligence", "lineHeight": 1.25
+    },
+    {
+      "id": "txtP3B", "type": "text", "x": 150, "y": 745, "width": 440, "height": 88,
+      "angle": 0, "strokeColor": "#1e1e1e", "backgroundColor": "transparent",
+      "fillStyle": "solid", "strokeWidth": 2, "strokeStyle": "solid", "roughness": 1,
+      "opacity": 100, "seed": 118, "version": 1, "versionNonce": 18, "isDeleted": false,
+      "groupIds": [], "frameId": null, "boundElements": [], "updated": 1, "link": null, "locked": false,
+      "text": "• Daily scrape: 7 agencies' rating actions + BSE/NSE announcements\n• LLM classifies: withdrawal / INC / downgrade / new issue\n• 'Hot leads this week' feed + email alerts\n• Becomes the real source for the 7-agency coverage matrix",
+      "fontSize": 14, "fontFamily": 1, "textAlign": "left", "verticalAlign": "top", "baseline": 12,
+      "containerId": null,
+      "originalText": "• Daily scrape: 7 agencies' rating actions + BSE/NSE announcements\n• LLM classifies: withdrawal / INC / downgrade / new issue\n• 'Hot leads this week' feed + email alerts\n• Becomes the real source for the 7-agency coverage matrix",
+      "lineHeight": 1.25
+    },
+    {
+      "id": "noteP3", "type": "text", "x": 625, "y": 760, "width": 150, "height": 40,
+      "angle": 0, "strokeColor": "#868e96", "backgroundColor": "transparent",
+      "fillStyle": "solid", "strokeWidth": 2, "strokeStyle": "solid", "roughness": 1,
+      "opacity": 100, "seed": 119, "version": 1, "versionNonce": 19, "isDeleted": false,
+      "groupIds": [], "frameId": null, "boundElements": [], "updated": 1, "link": null, "locked": false,
+      "text": "fixes P3 —\nthe differentiator", "fontSize": 14, "fontFamily": 1,
+      "textAlign": "left", "verticalAlign": "top", "baseline": 12,
+      "containerId": null, "originalText": "fixes P3 —\nthe differentiator", "lineHeight": 1.25
+    },
+
+    {
+      "id": "ar4", "type": "arrow", "x": 370, "y": 855, "width": 0, "height": 40,
+      "angle": 0, "strokeColor": "#1e1e1e", "backgroundColor": "transparent",
+      "fillStyle": "solid", "strokeWidth": 2, "strokeStyle": "solid", "roughness": 1,
+      "opacity": 100, "seed": 120, "version": 1, "versionNonce": 20, "isDeleted": false,
+      "groupIds": [], "frameId": null, "boundElements": [], "updated": 1, "link": null, "locked": false,
+      "points": [[0, 0], [0, 40]], "lastCommittedPoint": null,
+      "startBinding": null, "endBinding": null, "startArrowhead": null, "endArrowhead": "arrow"
+    },
+
+    {
+      "id": "boxP4", "type": "rectangle", "x": 130, "y": 900, "width": 480, "height": 125,
+      "angle": 0, "strokeColor": "#f08c00", "backgroundColor": "#ffec99",
+      "fillStyle": "solid", "strokeWidth": 2, "strokeStyle": "solid", "roughness": 1,
+      "opacity": 100, "seed": 121, "version": 1, "versionNonce": 21, "isDeleted": false,
+      "groupIds": [], "frameId": null, "boundElements": [], "updated": 1, "link": null, "locked": false,
+      "roundness": { "type": 3 }
+    },
+    {
+      "id": "txtP4H", "type": "text", "x": 150, "y": 910, "width": 360, "height": 25,
+      "angle": 0, "strokeColor": "#1e1e1e", "backgroundColor": "transparent",
+      "fillStyle": "solid", "strokeWidth": 2, "strokeStyle": "solid", "roughness": 1,
+      "opacity": 100, "seed": 122, "version": 1, "versionNonce": 22, "isDeleted": false,
+      "groupIds": [], "frameId": null, "boundElements": [], "updated": 1, "link": null, "locked": false,
+      "text": "Phase 4 — Workflow & CRM", "fontSize": 20, "fontFamily": 1,
+      "textAlign": "left", "verticalAlign": "top", "baseline": 18,
+      "containerId": null, "originalText": "Phase 4 — Workflow & CRM", "lineHeight": 1.25
+    },
+    {
+      "id": "txtP4B", "type": "text", "x": 150, "y": 940, "width": 440, "height": 66,
+      "angle": 0, "strokeColor": "#1e1e1e", "backgroundColor": "transparent",
+      "fillStyle": "solid", "strokeWidth": 2, "strokeStyle": "solid", "roughness": 1,
+      "opacity": 100, "seed": 123, "version": 1, "versionNonce": 23, "isDeleted": false,
+      "groupIds": [], "frameId": null, "boundElements": [], "updated": 1, "link": null, "locked": false,
+      "text": "• Lead pipeline: New → Contacted → Meeting → Won/Lost\n• Owners, notes, saved searches, dedupe by CIN\n• Weekly digest + optional Zoho CRM push",
+      "fontSize": 14, "fontFamily": 1, "textAlign": "left", "verticalAlign": "top", "baseline": 12,
+      "containerId": null,
+      "originalText": "• Lead pipeline: New → Contacted → Meeting → Won/Lost\n• Owners, notes, saved searches, dedupe by CIN\n• Weekly digest + optional Zoho CRM push",
+      "lineHeight": 1.25
+    },
+    {
+      "id": "noteP4", "type": "text", "x": 625, "y": 950, "width": 130, "height": 20,
+      "angle": 0, "strokeColor": "#868e96", "backgroundColor": "transparent",
+      "fillStyle": "solid", "strokeWidth": 2, "strokeStyle": "solid", "roughness": 1,
+      "opacity": 100, "seed": 124, "version": 1, "versionNonce": 24, "isDeleted": false,
+      "groupIds": [], "frameId": null, "boundElements": [], "updated": 1, "link": null, "locked": false,
+      "text": "delivers req 4", "fontSize": 14, "fontFamily": 1,
+      "textAlign": "left", "verticalAlign": "top", "baseline": 12,
+      "containerId": null, "originalText": "delivers req 4", "lineHeight": 1.25
+    },
+
+    {
+      "id": "ar5", "type": "arrow", "x": 370, "y": 1030, "width": 0, "height": 40,
+      "angle": 0, "strokeColor": "#1e1e1e", "backgroundColor": "transparent",
+      "fillStyle": "solid", "strokeWidth": 2, "strokeStyle": "solid", "roughness": 1,
+      "opacity": 100, "seed": 125, "version": 1, "versionNonce": 25, "isDeleted": false,
+      "groupIds": [], "frameId": null, "boundElements": [], "updated": 1, "link": null, "locked": false,
+      "points": [[0, 0], [0, 40]], "lastCommittedPoint": null,
+      "startBinding": null, "endBinding": null, "startArrowhead": null, "endArrowhead": "arrow"
+    },
+
+    {
+      "id": "boxGoal", "type": "rectangle", "x": 130, "y": 1075, "width": 480, "height": 70,
+      "angle": 0, "strokeColor": "#0c8599", "backgroundColor": "#99e9f2",
+      "fillStyle": "solid", "strokeWidth": 2, "strokeStyle": "solid", "roughness": 1,
+      "opacity": 100, "seed": 126, "version": 1, "versionNonce": 26, "isDeleted": false,
+      "groupIds": [], "frameId": null, "boundElements": [], "updated": 1, "link": null, "locked": false,
+      "roundness": { "type": 3 }
+    },
+    {
+      "id": "txtGoal", "type": "text", "x": 155, "y": 1090, "width": 430, "height": 44,
+      "angle": 0, "strokeColor": "#1e1e1e", "backgroundColor": "transparent",
+      "fillStyle": "solid", "strokeWidth": 2, "strokeStyle": "solid", "roughness": 1,
+      "opacity": 100, "seed": 127, "version": 1, "versionNonce": 27, "isDeleted": false,
+      "groupIds": [], "frameId": null, "boundElements": [], "updated": 1, "link": null, "locked": false,
+      "text": "Goal: complete data → trusted → differentiated → sticky.\nA tool ACER's sales team lives in every day.",
+      "fontSize": 16, "fontFamily": 1, "textAlign": "left", "verticalAlign": "top", "baseline": 14,
+      "containerId": null,
+      "originalText": "Goal: complete data → trusted → differentiated → sticky.\nA tool ACER's sales team lives in every day.",
+      "lineHeight": 1.25
+    }
+  ],
+  "appState": { "viewBackgroundColor": "#ffffff", "gridSize": null },
+  "files": {}
+}
