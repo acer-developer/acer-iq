@@ -75,16 +75,41 @@ def _latest_rating(instruments: list[dict]) -> str:
 
 async def fetch_credit_history(company_name: str, cin: str = "") -> dict:
     """
-    Fetch all debt instruments for a company from BSE and map them
-    across the 7 credit rating agencies.
+    Build the 7-agency rating matrix from two sources:
+      1. NSE corporate disclosures (SEBI-mandated rating-action filings) —
+         primary; real agency names, ratings, actions, dates.
+      2. BSE debt-search instruments — secondary, merged when reachable.
+
+    Returns data_status so the UI can distinguish "verified: not rated"
+    from "sources unreachable: unknown".
     """
+    from backend.pipeline.nse_ratings import fetch_rating_actions
+
+    nse_actions, nse_status = await fetch_rating_actions(company_name)
     instruments = await fetch_past_instruments(company_name)
 
     agency_map: dict[str, list[dict]] = {ag["key"]: [] for ag in AGENCIES}
 
+    # NSE rating actions (newest first already)
+    for act in nse_actions:
+        key = _match_agency(act["agency"])
+        if key:
+            agency_map[key].append({
+                "security_name": act["rating"] or "Rating action",
+                "isin": act["isin"],
+                "instrument_type": act["action"] or "Disclosure",
+                "rating": act["rating"],
+                "issue_date": act["date"],
+                "maturity_date": act["date"],
+                "coupon_rate": "",
+                "status": act["action"] or "Disclosed",
+                "amount_crores": "",
+                "source": "NSE disclosure",
+            })
+
+    # BSE instruments (when its API cooperates)
     for inst in instruments:
-        raw_agency = inst.get("rating_agency", "")
-        key = _match_agency(raw_agency)
+        key = _match_agency(inst.get("rating_agency", ""))
         if key:
             agency_map[key].append({
                 "security_name": inst.get("security_name", ""),
@@ -96,6 +121,7 @@ async def fetch_credit_history(company_name: str, cin: str = "") -> dict:
                 "coupon_rate": inst.get("coupon_rate", ""),
                 "status": inst.get("status", ""),
                 "amount_crores": inst.get("amount_crores", ""),
+                "source": "BSE",
             })
 
     result_agencies = []
@@ -114,10 +140,24 @@ async def fetch_credit_history(company_name: str, cin: str = "") -> dict:
         })
 
     rated_count = sum(1 for a in result_agencies if a["is_rated"])
+    total = len(nse_actions) + len(instruments)
+
+    # Honest status: "ok" = we have verified data; "none_found" = sources
+    # answered but nothing matched; "unverified" = sources unreachable, so
+    # absence of ratings means NOTHING.
+    if total > 0:
+        data_status = "ok"
+    elif nse_status == "none":
+        data_status = "none_found"
+    else:
+        data_status = "unverified"
 
     return {
         "agencies": result_agencies,
-        "total_instruments": len(instruments),
+        "total_instruments": total,
         "rated_by_count": rated_count,
         "raw_instruments": instruments,
+        "rating_actions": nse_actions[:40],
+        "data_status": data_status,
+        "sources": {"nse": nse_status, "bse": "ok" if instruments else "empty_or_blocked"},
     }

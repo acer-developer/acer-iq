@@ -182,7 +182,7 @@ function RatingBadge({ rating }) {
 }
 
 // ── Agency row ────────────────────────────────────────────────────────────────
-function AgencyRow({ agency }) {
+function AgencyRow({ agency, unverified }) {
   const [expanded, setExpanded] = useState(false);
   const isInfomerics = agency.key === "INFOMERICS";
 
@@ -203,7 +203,9 @@ function AgencyRow({ agency }) {
         </td>
         <td className="px-4 py-3">
           {agency.is_rated ? <RatingBadge rating={agency.latest_rating} /> : (
-            <span className="text-xs text-gray-400">Not rated</span>
+            <span className={`text-xs ${unverified ? "text-amber-500 font-medium" : "text-gray-400"}`}>
+              {unverified ? "Unknown — verify" : "Not rated"}
+            </span>
           )}
         </td>
         <td className="px-4 py-3 text-center">
@@ -218,9 +220,9 @@ function AgencyRow({ agency }) {
         </td>
         <td className="px-4 py-3">
           <div className={`flex items-center gap-1.5`}>
-            <span className={`h-2 w-2 rounded-full ${agency.is_rated ? "bg-green-400" : "bg-gray-200"}`} />
-            <span className={`text-xs font-medium ${agency.is_rated ? "text-green-600" : "text-gray-400"}`}>
-              {agency.is_rated ? "Rated" : "No data"}
+            <span className={`h-2 w-2 rounded-full ${agency.is_rated ? "bg-green-400" : unverified ? "bg-amber-300" : "bg-gray-200"}`} />
+            <span className={`text-xs font-medium ${agency.is_rated ? "text-green-600" : unverified ? "text-amber-500" : "text-gray-400"}`}>
+              {agency.is_rated ? "Rated" : unverified ? "Unverified" : "Not found"}
             </span>
           </div>
         </td>
@@ -464,6 +466,8 @@ export default function CompanyResearchPage() {
   const company         = result?.company                      ?? null;
   const totalInstruments = result?.credit_data?.total_instruments ?? 0;
   const ratedByCount    = result?.credit_data?.rated_by_count   ?? 0;
+  const dataStatus      = result?.credit_data?.data_status      ?? "ok";
+  const unverified      = dataStatus === "unverified";
 
   return (
     <div className="flex flex-1 flex-col overflow-hidden bg-gray-50">
@@ -509,12 +513,24 @@ export default function CompanyResearchPage() {
             <>
               <CompanyInfo company={company} />
 
+              {unverified && (
+                <div className="mb-4 flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
+                  <span className="mt-0.5 text-amber-500">⚠</span>
+                  <div className="text-xs text-amber-800">
+                    <span className="font-bold">Rating history could not be verified right now</span> — NSE/BSE
+                    disclosure sources are unreachable. The statuses below mean
+                    <span className="font-semibold"> unknown</span>, not unrated. Use the per-agency Search
+                    links to verify manually.
+                  </div>
+                </div>
+              )}
+
               {/* Stats */}
               <div className="mb-5 grid grid-cols-3 gap-3">
                 {[
-                  { label: "Total Instruments", value: totalInstruments,    color: "text-blue-600 bg-blue-50" },
-                  { label: "Agencies Rating",   value: `${ratedByCount} / 7`, color: "text-emerald-600 bg-emerald-50" },
-                  { label: "Not Rated By",      value: 7 - ratedByCount,    color: "text-amber-600 bg-amber-50" },
+                  { label: "Rating Actions & Instruments", value: unverified ? "—" : totalInstruments, color: "text-blue-600 bg-blue-50" },
+                  { label: "Agencies Rating",   value: unverified ? "?" : `${ratedByCount} / 7`, color: "text-emerald-600 bg-emerald-50" },
+                  { label: unverified ? "Unverified" : "Not Rated By", value: unverified ? "7" : 7 - ratedByCount, color: "text-amber-600 bg-amber-50" },
                 ].map(({ label, value, color }) => (
                   <div key={label} className="rounded-xl border border-gray-200 bg-white p-4 text-center">
                     <div className={`text-2xl font-black ${color}`}>{value}</div>
@@ -529,7 +545,7 @@ export default function CompanyResearchPage() {
                   <h3 className="text-sm font-bold text-gray-900">
                     Credit Rating History — All 7 Agencies
                   </h3>
-                  <span className="text-xs text-gray-400">Source: BSE India</span>
+                  <span className="text-xs text-gray-400">Source: NSE corporate disclosures + BSE debt data</span>
                 </div>
                 <div className="overflow-x-auto">
                   <table className="w-full">
@@ -542,16 +558,17 @@ export default function CompanyResearchPage() {
                     </thead>
                     <tbody>
                       {agencies.map(agency => (
-                        <AgencyRow key={agency.key} agency={agency} />
+                        <AgencyRow key={agency.key} agency={agency} unverified={unverified} />
                       ))}
                     </tbody>
                   </table>
                 </div>
               </div>
 
-              {totalInstruments === 0 && (
+              {totalInstruments === 0 && !unverified && (
                 <p className="mt-4 text-center text-sm text-gray-400">
-                  No BSE-listed instruments found — company may have unlisted or private debt.
+                  No exchange-disclosed rating actions or listed instruments matched this exact name —
+                  company may be unrated, privately rated, or disclosed under a different legal spelling.
                 </p>
               )}
             </>

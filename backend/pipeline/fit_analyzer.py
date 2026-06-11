@@ -99,18 +99,34 @@ def _data_driven_analysis(company: dict, credit_data: dict) -> dict:
         ]
         best_pitch = "Renewal + additional instruments"
 
+    elif rated_by == 0 and total == 0 and credit_data.get("data_status") == "unverified":
+        # Sources unreachable — absence of data proves NOTHING. Say so.
+        score = 50
+        opportunity = "Rating history could not be verified — data sources unreachable"
+        urgency = "Medium"
+        insights = [
+            f"NSE/BSE disclosure sources were unreachable, so {name}'s rating coverage is UNKNOWN — not necessarily unrated",
+            "Use the per-agency 'Search' links in the table to verify coverage manually before any outreach",
+            f"{entity} profile from the RBI registry is verified — only the rating history is missing",
+        ]
+        watch_outs = [
+            "Do NOT pitch this as a first-time mandate until coverage is manually verified",
+            "Large established names are almost certainly already rated by major agencies",
+        ]
+        best_pitch = "Verify first"
+
     elif rated_by == 0 and total == 0:
         score = 82
-        opportunity = "First-time rating mandate — company has no BSE-listed rated instruments"
+        opportunity = "Possible first-time mandate — no exchange-disclosed rating actions found under this name"
         urgency = "High"
         insights = [
-            f"{name} has no BSE-listed rated instruments — clean slate opportunity for ACER as first mover",
+            f"No NSE rating-action disclosures or BSE-listed rated instruments matched {name} — likely unrated or privately rated",
             f"{entity} entities at this scale are increasingly moving to rated debt to reduce borrowing costs",
             "No competitive displacement required — ACER can build the entire rating relationship from scratch",
         ]
         watch_outs = [
+            "Exchange disclosures match exact names — a different legal spelling could hide existing ratings; spot-check one agency manually",
             "Verify company is actually seeking debt financing before investing sales effort",
-            "May need education on benefits of credit rating if first-time issuer",
         ]
         best_pitch = "NCD" if entity in ("NBFC", "Corporate") else "Bond"
 
@@ -192,9 +208,20 @@ async def analyze_fit(company: dict, credit_data: dict) -> dict:
     # Always compute the data-driven baseline first
     result = _data_driven_analysis(company, credit_data)
 
+    # No verified data → no LLM (it would confidently invent a story)
+    if credit_data.get("data_status") == "unverified":
+        return result
+
     # Try AI enrichment if key is available
     agencies       = credit_data.get("agencies", [])
     rating_summary = _build_rating_summary(agencies)
+    actions = credit_data.get("rating_actions", [])[:8]
+    if actions:
+        action_lines = "\n".join(
+            f"  - {a['date']}: {a['agency']} — {a['rating']} ({a['action']})"
+            for a in actions
+        )
+        rating_summary += f"\n\nRecent rating actions (NSE disclosures, newest first):\n{action_lines}"
     rated_by_count = credit_data.get("rated_by_count", 0)
 
     prompt = FIT_PROMPT.format(
