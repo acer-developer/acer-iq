@@ -73,7 +73,7 @@ def _latest_rating(instruments: list[dict]) -> str:
     return "—"
 
 
-async def fetch_credit_history(company_name: str, cin: str = "") -> dict:
+async def fetch_credit_history(company_name: str, cin: str = "", symbol: str = "") -> dict:
     """
     Build the 7-agency rating matrix from two sources:
       1. NSE corporate disclosures (SEBI-mandated rating-action filings) —
@@ -85,7 +85,7 @@ async def fetch_credit_history(company_name: str, cin: str = "") -> dict:
     """
     from backend.pipeline.nse_ratings import fetch_rating_actions
 
-    nse_actions, nse_status = await fetch_rating_actions(company_name)
+    nse_actions, nse_status = await fetch_rating_actions(company_name, symbol=symbol)
     instruments = await fetch_past_instruments(company_name)
 
     agency_map: dict[str, list[dict]] = {ag["key"]: [] for ag in AGENCIES}

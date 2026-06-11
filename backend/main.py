@@ -290,9 +290,10 @@ async def company_credit(req: CompanyCreditRequest):
     if not company_info["address"]:
         company_info["address"] = "India"
 
-    # Fetch credit history from BSE
+    # Fetch credit history (NSE disclosures + announcements + BSE)
+    company_info["symbol"] = (reg or {}).get("symbol", "")
     search_name = company_info["name"] if company_info["name"] != query else query
-    credit_data = await _safe(fetch_credit_history(search_name), {
+    credit_data = await _safe(fetch_credit_history(search_name, symbol=company_info["symbol"]), {
         "agencies": [],
         "total_instruments": 0,
         "rated_by_count": 0,

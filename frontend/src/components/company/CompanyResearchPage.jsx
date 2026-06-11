@@ -565,6 +565,50 @@ export default function CompanyResearchPage() {
                 </div>
               </div>
 
+              {(result?.credit_data?.rating_actions?.length ?? 0) > 0 && (
+                <div className="mt-5 overflow-hidden rounded-xl border border-gray-200 bg-white">
+                  <div className="flex items-center justify-between border-b border-gray-100 px-4 py-3">
+                    <h3 className="text-sm font-bold text-gray-900">
+                      Rating Disclosure Timeline ({result.credit_data.rating_actions.length})
+                    </h3>
+                    <span className="text-xs text-gray-400">NSE corporate filings — click to open the actual document</span>
+                  </div>
+                  <div className="max-h-80 overflow-y-auto divide-y divide-gray-50">
+                    {result.credit_data.rating_actions.map((a, i) => (
+                      <div key={i} className="flex items-start gap-3 px-4 py-2.5 hover:bg-gray-50">
+                        <span className="mt-0.5 w-20 shrink-0 font-mono text-[11px] text-gray-400">{a.date}</span>
+                        <div className="min-w-0 flex-1">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className={`text-xs font-semibold ${a.agency?.startsWith("Disclosed") ? "text-gray-500" : "text-gray-800"}`}>
+                              {a.agency}
+                            </span>
+                            {a.rating && a.rating !== "See filing" && (
+                              <span className="rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] font-bold text-amber-700">
+                                {a.rating}
+                              </span>
+                            )}
+                            <span className={`text-[10px] font-medium ${
+                              /upgrad/i.test(a.action) ? "text-green-600" :
+                              /downgrad|withdraw/i.test(a.action) ? "text-red-500" : "text-gray-400"}`}>
+                              {a.action}
+                            </span>
+                          </div>
+                          {a.detail && (
+                            <div className="mt-0.5 truncate text-[11px] text-gray-400" title={a.detail}>{a.detail}</div>
+                          )}
+                        </div>
+                        {a.attachment && (
+                          <a href={a.attachment} target="_blank" rel="noreferrer"
+                            className="shrink-0 text-[11px] font-medium text-blue-600 hover:underline">
+                            Filing ↗
+                          </a>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               {totalInstruments === 0 && !unverified && (
                 <p className="mt-4 text-center text-sm text-gray-400">
                   No exchange-disclosed rating actions or listed instruments matched this exact name —

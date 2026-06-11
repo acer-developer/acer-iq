@@ -106,15 +106,96 @@ def _date_key(d: str) -> tuple:
     return (m.group(3), m.group(2), m.group(1)) if m else ("0", "0", "0")
 
 
-async def fetch_rating_actions(company_name: str) -> tuple[list[dict], str]:
+# ── Rating actions mined from corporate announcements (listed companies) ──────
+# Equity-listed companies file rating actions as 'Credit Rating' announcements;
+# the structured credit-rating feed often misses them entirely (e.g. Suzlon).
+
+NSE_ANNOUNCEMENTS = "https://www.nseindia.com/api/corporate-announcements"
+
+_MONTHS = {"Jan": "01", "Feb": "02", "Mar": "03", "Apr": "04", "May": "05",
+           "Jun": "06", "Jul": "07", "Aug": "08", "Sep": "09", "Oct": "10",
+           "Nov": "11", "Dec": "12"}
+
+_AGENCY_RE = re.compile(
+    r"\b(CRISIL|ICRA|CARE(?:\s+Ratings|EDGE)?|India\s+Ratings|IND[- ]RA|Acuit[eé]|"
+    r"Brickwork|BWR|Infomerics|IVR|SMERA|Fitch)\b", re.I)
+
+_RATING_RE = re.compile(
+    r"\b((?:CRISIL|ICRA|CARE|IND|BWR|IVR|Acuite|Crisil|Ind)?\s?"
+    r"(?:AAA|AA\+|AA-|AA|A1\+|A1|A2\+|A2|A3\+|A3|A4\+|A4|A\+|A-|"
+    r"BBB\+|BBB-|BBB|BB\+|BB-|BB|B\+|B-|D)"
+    r"(?:\s*\(?(?:Stable|Positive|Negative|CE|SO)\)?)?)", re.I)
+
+_ACTION_RE = re.compile(
+    r"\b(upgrad\w*|downgrad\w*|reaffirm\w*|re-affirm\w*|withdraw\w*|assign\w*|"
+    r"revis\w*|placed on watch|rating watch)\b", re.I)
+
+
+def _ann_date(an_dt: str) -> str:
+    """'30-Jul-2025 17:31:05' → '30-07-2025'."""
+    m = re.match(r"(\d{2})-([A-Za-z]{3})-(\d{4})", an_dt or "")
+    if not m:
+        return ""
+    return f"{m.group(1)}-{_MONTHS.get(m.group(2).title(), '01')}-{m.group(3)}"
+
+
+async def fetch_announcement_ratings(symbol: str, company_name: str) -> list[dict]:
+    """Mine 'Credit Rating' announcements for an NSE symbol into rating actions.
+    Less structured than the credit-rating feed, but actually complete."""
+    if not symbol or _tripped():
+        return []
+    client = _get_client()
+    try:
+        await _warmup(client)
+        r = await client.get(NSE_ANNOUNCEMENTS,
+                             params={"index": "equities", "symbol": symbol})
+        if r.status_code != 200 or "json" not in r.headers.get("content-type", ""):
+            _record(False)
+            return []
+        _record(True)
+        data = r.json()
+        items = data if isinstance(data, list) else data.get("data", [])
+    except Exception:
+        _record(False)
+        return []
+
+    actions: list[dict] = []
+    for it in items:
+        desc = str(it.get("desc") or "")
+        text = str(it.get("attchmntText") or "")
+        blob = f"{desc} {text}"
+        if "credit rating" not in blob.lower() and not (
+            "rating" in blob.lower() and _AGENCY_RE.search(blob)
+        ):
+            continue
+        agency_m = _AGENCY_RE.search(blob)
+        rating_m = _RATING_RE.search(text)
+        action_m = _ACTION_RE.search(blob)
+        actions.append({
+            "agency": agency_m.group(1) if agency_m else "Disclosed (see filing)",
+            "rating": (rating_m.group(1).strip() if rating_m else "") or "See filing",
+            "action": (action_m.group(1).title() if action_m else "Credit Rating disclosure"),
+            "date": _ann_date(str(it.get("an_dt") or "")),
+            "isin": "",
+            "company_name": company_name,
+            "detail": text[:220],
+            "attachment": str(it.get("attchmntFile") or ""),
+        })
+    actions.sort(key=lambda a: _date_key(a["date"]), reverse=True)
+    return actions[:40]
+
+
+async def fetch_rating_actions(company_name: str, symbol: str = "") -> tuple[list[dict], str]:
     """
     Returns (actions, status).
     status: "ok"        — NSE answered, actions found
             "none"      — NSE answered, no disclosures matched this name
             "blocked"   — NSE unreachable / blocking us (data NOT verified)
-    Actions sorted newest first.
+    Actions sorted newest first. Combines the structured credit-rating feed
+    (issuer exact match) with rating actions mined from the company's
+    'Credit Rating' announcements (by NSE symbol, for listed companies).
     """
-    key = company_name.strip().lower()
+    key = f"{company_name.strip().lower()}|{symbol.strip().upper()}"
     if key in _cache:
         return _cache[key], "ok" if _cache[key] else "none"
     if _tripped():
@@ -151,6 +232,16 @@ async def fetch_rating_actions(company_name: str) -> tuple[list[dict], str]:
                 break
     except Exception:
         _record(False)
+
+    # Announcements-mined actions for listed companies (covers the many
+    # issuers the structured feed misses, e.g. Suzlon)
+    try:
+        ann = await fetch_announcement_ratings(symbol, company_name)
+        if ann:
+            answered = True
+            actions.extend(ann)
+    except Exception:
+        pass
 
     if not answered and not actions:
         return [], "blocked"
