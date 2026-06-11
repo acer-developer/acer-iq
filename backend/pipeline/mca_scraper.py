@@ -11,6 +11,8 @@ Source chain:
 import re
 import httpx
 
+from backend.pipeline.bse_scraper import _bse_record, _bse_tripped, get_bse_client
+
 _BSE_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
                   "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
@@ -25,6 +27,17 @@ _WEB_HEADERS = {
     "Accept-Language": "en-US,en;q=0.9",
 }
 
+_web_client = None
+
+
+def _get_web_client():
+    global _web_client
+    if _web_client is None or _web_client.is_closed:
+        _web_client = httpx.AsyncClient(timeout=8, headers=_WEB_HEADERS,
+                                        follow_redirects=True)
+    return _web_client
+
+
 _CIN_RE = re.compile(r"^[LU]\d{5}[A-Z]{2}\d{4}[A-Z]{3}\d{6}$")
 
 
@@ -35,12 +48,16 @@ async def _bse_corp_info(scrip_code: str) -> dict:
     Call BSE CorpInfo endpoint for a known scrip code.
     Returns dict with cin, directors, registered_address, incorporation_date.
     """
+    if _bse_tripped():
+        return {}
     try:
-        async with httpx.AsyncClient(timeout=10, headers=_BSE_HEADERS) as client:
+        client = get_bse_client()
+        if True:
             r = await client.get(
                 "https://api.bseindia.com/BseIndiaAPI/api/CorpInfo/w",
                 params={"scripcode": scrip_code},
             )
+            _bse_record(r.status_code == 200)
             if r.status_code != 200:
                 return {}
 
@@ -99,13 +116,17 @@ async def _bse_corp_info(scrip_code: str) -> dict:
 
 async def _bse_equity_cin(company_name: str) -> dict:
     """Search BSE equity segment by name to get scrip code, then fetch CorpInfo."""
+    if _bse_tripped():
+        return {}
     try:
-        async with httpx.AsyncClient(timeout=10, headers=_BSE_HEADERS) as client:
+        client = get_bse_client()
+        if True:
             r = await client.get(
                 "https://api.bseindia.com/BseIndiaAPI/api/SearchData/w",
                 params={"strText": company_name, "flag": "0",
                         "Membertype": "S", "pageno": "1", "tab": "EQ"},
             )
+            _bse_record(r.status_code == 200)
             if r.status_code != 200:
                 return {}
             rows = r.json().get("Table") or []
@@ -127,13 +148,17 @@ async def _bse_equity_cin(company_name: str) -> dict:
 
 async def _bse_debt_cin(company_name: str) -> dict:
     """Search BSE debt segment — covers NBFC / debt-only issuers."""
+    if _bse_tripped():
+        return {}
     try:
-        async with httpx.AsyncClient(timeout=10, headers=_BSE_HEADERS) as client:
+        client = get_bse_client()
+        if True:
             r = await client.get(
                 "https://api.bseindia.com/BseIndiaAPI/api/SearchData/w",
                 params={"strText": company_name, "flag": "0",
                         "Membertype": "S", "pageno": "1", "tab": "DEBT"},
             )
+            _bse_record(r.status_code == 200)
             if r.status_code != 200:
                 return {}
             rows = r.json().get("Table") or []
@@ -167,9 +192,8 @@ async def _zauba_cin(company_name: str) -> dict:
     """Scrape Zauba Corp search page — works for unlisted/private companies."""
     try:
         from bs4 import BeautifulSoup
-        async with httpx.AsyncClient(
-            timeout=15, headers=_WEB_HEADERS, follow_redirects=True
-        ) as client:
+        client = _get_web_client()
+        if True:
             r = await client.get(
                 "https://www.zaubacorp.com/company-search",
                 params={"search": company_name},
@@ -222,24 +246,30 @@ async def _zauba_cin(company_name: str) -> dict:
 
 # ── Public entry point ────────────────────────────────────────────────────────
 
-async def fetch_mca_data(company_name: str) -> dict:
+_cache: dict[str, dict] = {}
+
+
+async def fetch_mca_data(company_name: str, skip_zauba: bool = False) -> dict:
     """
     BSE equity → BSE debt → Zauba Corp fallback.
-    Returns empty dict on total failure.
+    Returns empty dict on total failure. Results are cached per process.
+
+    skip_zauba: pass True for companies unlikely to be on Zauba or when speed
+    matters more than director coverage (e.g. bulk search enrichment).
     """
+    key = company_name.strip().lower()
+    if key in _cache:
+        return _cache[key]
+
     result = await _bse_equity_cin(company_name)
-    if result.get("cin"):
-        return result
+    if not result.get("cin"):
+        result = await _bse_debt_cin(company_name)
+    if not result.get("cin") and not skip_zauba:
+        result = await _zauba_cin(company_name)
 
-    result = await _bse_debt_cin(company_name)
-    if result.get("cin"):
-        return result
-
-    result = await _zauba_cin(company_name)
-    if result.get("cin"):
-        return result
-
-    return _empty()
+    result = result if result.get("cin") else _empty()
+    _cache[key] = result
+    return result
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────

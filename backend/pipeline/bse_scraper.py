@@ -1,5 +1,57 @@
 import re
+import time
 import httpx
+
+# ── Shared client: creating an AsyncClient per call costs ~1s of blocking
+# SSL-context setup on Windows and serializes the event loop ─────────────────
+_client: httpx.AsyncClient | None = None
+
+
+def get_bse_client() -> httpx.AsyncClient:
+    global _client
+    if _client is None or _client.is_closed:
+        _client = httpx.AsyncClient(timeout=6, headers=_HEADERS)
+    return _client
+
+
+# ── Circuit breaker: when BSE blocks/tarpits us, stop hammering it ───────────
+# 8 consecutive failed calls → skip BSE entirely for 10 minutes.
+_breaker = {"fails": 0, "until": 0.0}
+
+
+def _bse_tripped() -> bool:
+    return time.time() < _breaker["until"]
+
+
+def _bse_record(ok: bool) -> None:
+    if ok:
+        _breaker["fails"] = 0
+    else:
+        _breaker["fails"] += 1
+        if _breaker["fails"] >= 8:
+            _breaker["until"] = time.time() + 600
+            _breaker["fails"] = 0
+
+
+async def bse_health_check() -> bool:
+    """One cheap canary call before bulk enrichment. If BSE is down or
+    blocking this IP, trip the breaker immediately so a 60-lead search
+    doesn't burn a timeout per lead."""
+    if _bse_tripped():
+        return False
+    ok = False
+    try:
+        r = await get_bse_client().get(
+            BSE_DEBT_ALT,
+            params={"strText": "Reliance", "flag": "0", "Membertype": "S",
+                    "pageno": "1", "tab": "DEBT"},
+        )
+        ok = r.status_code == 200
+    except Exception:
+        ok = False
+    if not ok:
+        _breaker["until"] = time.time() + 600
+    return ok
 
 BSE_DEBT_SEARCH = "https://api.bseindia.com/BseIndiaAPI/api/GetDebtScripsSearchData/w"
 BSE_DEBT_ALT    = "https://api.bseindia.com/BseIndiaAPI/api/SearchData/w"
@@ -64,42 +116,52 @@ def _parse_bse_item(item: dict) -> dict:
 
 async def _search_bse_debt(search_name: str, client: httpx.AsyncClient) -> list[dict]:
     """Try primary BSE debt endpoint."""
+    if _bse_tripped():
+        return []
     try:
         resp = await client.get(
             BSE_DEBT_SEARCH,
             params={"scripname": search_name, "category": "", "subcateg": "", "status": "", "exDate": ""},
         )
+        _bse_record(resp.status_code == 200)
         if resp.status_code == 200:
             data = resp.json()
             rows = data.get("Table", data.get("data", []))
             if isinstance(rows, list) and rows:
                 return [_parse_bse_item(i) for i in rows[:12]]
     except Exception:
-        pass
+        _bse_record(False)
     return []
 
 
 async def _search_bse_alt(search_name: str, client: httpx.AsyncClient) -> list[dict]:
     """Try alternate BSE search endpoint filtered to DEBT tab."""
+    if _bse_tripped():
+        return []
     try:
         resp = await client.get(
             BSE_DEBT_ALT,
             params={"strText": search_name, "flag": "0", "Membertype": "S",
                     "pageno": "1", "tab": "DEBT"},
         )
+        _bse_record(resp.status_code == 200)
         if resp.status_code == 200:
             data = resp.json()
             rows = data.get("Table", data.get("data", []))
             if isinstance(rows, list) and rows:
                 return [_parse_bse_item(i) for i in rows[:12]]
     except Exception:
-        pass
+        _bse_record(False)
     return []
+
+
+_cache: dict[str, list] = {}
 
 
 async def fetch_past_instruments(company_name: str) -> list[dict]:
     """
     Fetch past NCD/Bond/Debt issuances for a company from BSE.
+    Results cached per process.
 
     Strategy:
     1. Clean name (remove branch/ATM suffixes from Overpass results)
@@ -107,29 +169,26 @@ async def fetch_past_instruments(company_name: str) -> list[dict]:
     3. Try full cleaned name on alternate endpoint
     4. Try short name (first 2-3 words) on both endpoints
     """
+    _key = company_name.strip().lower()
+    if _key in _cache:
+        return _cache[_key]
+    if _bse_tripped():
+        return []  # don't cache — retry once BSE recovers
+
     cleaned = _clean_name_for_bse(company_name)
     short   = _short_name(cleaned)
 
-    async with httpx.AsyncClient(timeout=10, headers=_HEADERS) as client:
-        # Attempt 1: full cleaned name, primary endpoint
-        instruments = await _search_bse_debt(cleaned, client)
-        if instruments:
-            return instruments
+    client = get_bse_client()
+    # Attempt 1: full cleaned name, primary endpoint
+    result = await _search_bse_debt(cleaned, client)
+    # Attempt 2: full cleaned name, alternate endpoint
+    if not result:
+        result = await _search_bse_alt(cleaned, client)
+    # Attempts 3-4: short name (handles abbreviations)
+    if not result and short and short.lower() != cleaned.lower():
+        result = await _search_bse_debt(short, client)
+        if not result:
+            result = await _search_bse_alt(short, client)
 
-        # Attempt 2: full cleaned name, alternate endpoint
-        instruments = await _search_bse_alt(cleaned, client)
-        if instruments:
-            return instruments
-
-        # Attempt 3: short name on primary (handles abbreviations)
-        if short and short.lower() != cleaned.lower():
-            instruments = await _search_bse_debt(short, client)
-            if instruments:
-                return instruments
-
-            # Attempt 4: short name, alternate endpoint
-            instruments = await _search_bse_alt(short, client)
-            if instruments:
-                return instruments
-
-    return []
+    _cache[_key] = result
+    return result

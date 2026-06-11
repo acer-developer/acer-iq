@@ -176,9 +176,12 @@ async def score_company(
     city: str,
     entity_type: str = "Financial Entity",
     instrument_type: str = "All",
+    use_llm: bool = True,
 ) -> dict:
     # Always run rule-based first — gives real data-driven scores immediately
     company = _rule_based_score(company)
+    if not use_llm:
+        return company
 
     # If OpenRouter key is configured, try to enrich with AI
     instruments  = company.get("past_instruments", [])

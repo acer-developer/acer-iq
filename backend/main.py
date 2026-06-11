@@ -20,7 +20,7 @@ from backend.pipeline.discovery import discover_companies
 from backend.pipeline.enricher import enrich_contacts
 from backend.pipeline.mca_scraper import fetch_mca_data
 from backend.pipeline.scorer import score_company
-from backend.pipeline.bse_scraper import fetch_past_instruments
+from backend.pipeline.bse_scraper import bse_health_check, fetch_past_instruments
 from backend.pipeline.office_locator import find_office_locations
 from backend.pipeline.credit_history import fetch_credit_history
 from backend.pipeline.fit_analyzer import analyze_fit
@@ -75,15 +75,32 @@ async def search_leads(req: SearchRequest):
     # Throttle enrichment so 60 leads don't mean 120+ concurrent BSE calls
     _sem = asyncio.Semaphore(8)
 
+    # Canary: if BSE is down/blocking, trip the breaker once up front
+    await bse_health_check()
+
     async def _enrich_one(c: dict) -> dict:
         async with _sem:
-            # MCA data — never overwrite registry values with blanks
-            mca = await _safe(fetch_mca_data(c["name"]), {})
-            c["cin"] = c.get("cin") or mca.get("cin", "")
-            c["incorporation_date"] = mca.get("incorporation_date", "")
-            c["directors"] = mca.get("directors", [])
-            if not c.get("address") and mca.get("registered_address"):
-                c["address"] = mca["registered_address"]
+            sub = c.get("registry_sub_type", "")
+            is_coop = sub in ("Co-operative Bank", "Scheduled UCB")
+
+            # MCA data — skipped when we already know the CIN (registry NBFCs:
+            # incorporation year is encoded in the CIN itself) and for co-op
+            # banks (cooperative societies, not MCA companies at all).
+            # Directors load on click via Company Research.
+            if c.get("cin"):
+                year = c["cin"][8:12]
+                c["incorporation_date"] = year if year.isdigit() else ""
+                c.setdefault("directors", [])
+            elif not is_coop:
+                mca = await _safe(fetch_mca_data(c["name"], skip_zauba=True), {})
+                c["cin"] = mca.get("cin", "")
+                c["incorporation_date"] = mca.get("incorporation_date", "")
+                c["directors"] = mca.get("directors", [])
+                if not c.get("address") and mca.get("registered_address"):
+                    c["address"] = mca["registered_address"]
+            else:
+                c.setdefault("incorporation_date", "")
+                c.setdefault("directors", [])
 
             # Registry email (RBI-filed contact) becomes the first contact
             if c.get("registry_email"):
@@ -97,13 +114,18 @@ async def search_leads(req: SearchRequest):
                     })
                 c["contacts"] = contacts
 
-            # BSE instruments
-            instruments = await _safe(fetch_past_instruments(c["name"]), [])
-            c["past_instruments"] = instruments
+            # BSE instruments — non-scheduled co-op banks never list debt on
+            # BSE; skip 4 wasted searches each
+            if sub == "Co-operative Bank":
+                c["past_instruments"] = []
+            else:
+                c["past_instruments"] = await _safe(fetch_past_instruments(c["name"]), [])
 
-            # AI scoring
+            # Scoring: rule-based only in bulk search (fast, deterministic).
+            # The LLM still powers fit analysis in Company Research.
             c = await _safe(
-                score_company(c, industry, req.city, c.get("entity_type", entity_type), instrument_type),
+                score_company(c, industry, req.city, c.get("entity_type", entity_type),
+                              instrument_type, use_llm=False),
                 c,
             )
             c.setdefault("score", 0)
