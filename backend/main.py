@@ -268,7 +268,7 @@ async def company_credit(req: CompanyCreditRequest):
         "sub_type": (reg or {}).get("sub_type", ""),
         "layer": (reg or {}).get("layer", ""),
         "deposit_taking": (reg or {}).get("deposit_taking", False),
-        "data_source": "RBI registry" if reg else "",
+        "data_source": (reg or {}).get("source", ""),
         "incorporation_date": "",
         "directors": [],
     }

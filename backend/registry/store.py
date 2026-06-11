@@ -133,6 +133,13 @@ def _badge(row: sqlite3.Row) -> str:
     return label
 
 
+def _row_get(row: sqlite3.Row, key: str) -> str:
+    try:
+        return row[key] or ""
+    except (IndexError, KeyError):
+        return ""
+
+
 def suggest(q: str, limit: int = 12) -> list[dict]:
     """Name autocomplete over the whole RBI registry. Instant, offline."""
     if not available() or len(q.strip()) < 2:
@@ -141,18 +148,26 @@ def suggest(q: str, limit: int = 12) -> list[dict]:
     with _connect() as con:
         rows = con.execute(
             """SELECT * FROM companies
-               WHERE name LIKE ? COLLATE NOCASE
-               ORDER BY CASE WHEN name LIKE ? COLLATE NOCASE THEN 0 ELSE 1 END,
+               WHERE name LIKE ? COLLATE NOCASE OR symbol LIKE ? COLLATE NOCASE
+               ORDER BY CASE WHEN symbol = ? COLLATE NOCASE THEN 0
+                             WHEN name LIKE ? COLLATE NOCASE THEN 1
+                             WHEN symbol LIKE ? COLLATE NOCASE THEN 2
+                             ELSE 3 END,
                         length(name)
                LIMIT ?""",
-            (f"%{needle}%", f"{needle}%", limit),
+            (f"%{needle}%", f"{needle}%", needle, f"{needle}%", f"{needle}%", limit),
         ).fetchall()
     return [{
         "name": r["name"],
         "cin": r["cin"] or "",
         "bse_code": "",
-        "sector": " · ".join(x for x in (_badge(r), r["city"]) if x),
-        "source": "rbi_registry",
+        "symbol": _row_get(r, "symbol"),
+        "sector": " · ".join(x for x in (
+            _badge(r),
+            f"NSE: {_row_get(r, 'symbol')}" if _row_get(r, "symbol") else "",
+            r["city"],
+        ) if x),
+        "source": "nse_listed" if r["entity_type"] == "Listed" else "rbi_registry",
     } for r in rows]
 
 
@@ -177,14 +192,16 @@ def get_by_name(name: str) -> dict | None:
             ).fetchone()
     if row is None:
         return None
+    etype = {"Listed": "Corporate"}.get(row["entity_type"], row["entity_type"])
     return {
         "name": row["name"], "cin": row["cin"] or "",
         "address": row["address"] or "", "city": row["city"] or "",
         "state": row["state"] or "", "email": row["email"] or "",
-        "entity_type": "Bank" if row["entity_type"] == "Bank" else row["entity_type"],
+        "entity_type": etype,
         "sub_type": _badge(row), "layer": row["layer"] or "",
         "deposit_taking": bool(row["deposit_taking"]),
-        "source": "RBI registry",
+        "symbol": _row_get(row, "symbol"), "isin": _row_get(row, "isin"),
+        "source": "NSE listed-company master" if row["entity_type"] == "Listed" else "RBI registry",
     }
 
 

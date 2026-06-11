@@ -39,6 +39,7 @@ RBI_NBFC_XLSX = ("https://rbidocs.rbi.org.in/rdocs/content/DOCs/"
 RBI_BANKS_PAGE = "https://www.rbi.org.in/commonperson/English/Scripts/banksinindia.aspx"
 RBI_UCB_SCHED = "https://rbidocs.rbi.org.in/rdocs/content/pdfs/schedulecoop.pdf"
 RBI_UCB_NONSCHED = "https://rbidocs.rbi.org.in/rdocs/content/pdfs/nonschedulecoop.pdf"
+NSE_EQUITY_MASTER = "https://archives.nseindia.com/content/equities/EQUITY_L.csv"
 
 _HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -75,6 +76,8 @@ CREATE TABLE IF NOT EXISTS companies (
     pincode TEXT DEFAULT '',
     email TEXT DEFAULT '',
     rbi_region TEXT DEFAULT '',
+    symbol TEXT DEFAULT '',          -- NSE trading symbol (listed companies)
+    isin TEXT DEFAULT '',
     lat REAL, lng REAL,
     source TEXT NOT NULL,             -- rbi_nbfc_list / rbi_ucb_sched / ...
     ingested_at TEXT DEFAULT CURRENT_TIMESTAMP
@@ -195,6 +198,30 @@ def parse_ucb_pdf(path: Path, scheduled: bool) -> list[dict]:
     return rows
 
 
+def parse_nse_equity(path: Path) -> list[dict]:
+    """All NSE-listed companies — symbol, official name, ISIN. The complete
+    listed universe for Company Research (every sector, not just finance)."""
+    import csv as _csv
+    rows: list[dict] = []
+    with open(path, newline="", encoding="utf-8-sig") as f:
+        for r in _csv.DictReader(f):
+            r = { (k or "").strip(): (v or "").strip() for k, v in r.items() }
+            name = r.get("NAME OF COMPANY", "")
+            symbol = r.get("SYMBOL", "")
+            if not name or r.get("SERIES", "") not in ("EQ", "BE", "SM", "ST", ""):
+                continue
+            rows.append({
+                "id": f"nse_{symbol}",
+                "name": name, "entity_type": "Listed", "sub_type": "NSE-listed",
+                "layer": "", "deposit_taking": 0, "cin": "",
+                "address": "", "city": "", "state": "", "pincode": "",
+                "email": "", "rbi_region": "",
+                "symbol": symbol, "isin": r.get("ISIN NUMBER", ""),
+                "source": "nse_equity_master",
+            })
+    return rows
+
+
 def sfb_rows() -> list[dict]:
     out = []
     for name, city, state in SMALL_FINANCE_BANKS:
@@ -213,6 +240,8 @@ def sfb_rows() -> list[dict]:
 def assign_coords(rows: list[dict]) -> int:
     placed = 0
     for r in rows:
+        r.setdefault("symbol", "")
+        r.setdefault("isin", "")
         c = city_coords(r["city"]) or city_coords(r["rbi_region"])
         if c:
             r["lat"], r["lng"] = jitter(c[0], c[1], r["id"])
@@ -243,12 +272,16 @@ def main() -> None:
                           DATA_DIR / "ucb_scheduled.pdf", b"%PDF")
         ucb_n = _download(client, RBI_BANKS_PAGE, RBI_UCB_NONSCHED,
                           DATA_DIR / "ucb_nonscheduled.pdf", b"%PDF")
+        nse_csv = _download(client, "https://www.nseindia.com", NSE_EQUITY_MASTER,
+                            DATA_DIR / "nse_equity.csv", b"SYMBOL")
 
     rows = parse_nbfc_xlsx(nbfc_x)
     log.info("NBFC/ARC rows: %d", len(rows))
     ucb_rows = parse_ucb_pdf(ucb_s, scheduled=True) + parse_ucb_pdf(ucb_n, scheduled=False)
     log.info("UCB rows: %d", len(ucb_rows))
-    rows += ucb_rows + sfb_rows()
+    listed = parse_nse_equity(nse_csv)
+    log.info("NSE-listed rows: %d", len(listed))
+    rows += ucb_rows + sfb_rows() + listed
 
     placed = assign_coords(rows)
     log.info("coords placed: %d / %d", placed, len(rows))
@@ -260,10 +293,10 @@ def main() -> None:
     con.executemany(
         """INSERT OR REPLACE INTO companies
            (id, name, entity_type, sub_type, layer, deposit_taking, cin, address,
-            city, state, pincode, email, rbi_region, lat, lng, source)
+            city, state, pincode, email, rbi_region, symbol, isin, lat, lng, source)
            VALUES (:id, :name, :entity_type, :sub_type, :layer, :deposit_taking,
                    :cin, :address, :city, :state, :pincode, :email, :rbi_region,
-                   :lat, :lng, :source)""",
+                   :symbol, :isin, :lat, :lng, :source)""",
         rows,
     )
     con.commit()

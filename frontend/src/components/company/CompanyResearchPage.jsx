@@ -134,7 +134,7 @@ function CompanySearchInput({ onSearch, loading }) {
           )}
         </div>
         <p className="mt-1 text-[11px] text-gray-400">
-          Searches 10,500+ RBI-registered NBFCs &amp; banks + BSE-listed companies · or paste a 21-character CIN
+          Searches every NSE-listed company (all sectors) + 10,500+ RBI-registered NBFCs &amp; banks · or paste a CIN
         </p>
       </div>
 
