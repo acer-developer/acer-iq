@@ -69,6 +69,7 @@ class SearchRequest(BaseModel):
     industry: str = ""
     entity_type: str = "All"
     instrument_type: str = "All"
+    size: str = "All"   # All | large (≥₹1,000cr / scheduled) | small
 
 
 class SearchResponse(BaseModel):

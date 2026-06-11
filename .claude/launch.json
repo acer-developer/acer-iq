@@ -5,7 +5,7 @@
       "name": "lead-gen-frontend",
       "runtimeExecutable": "npm",
       "runtimeArgs": ["run", "dev"],
-      "cwd": "C:\\Users\\Dell\\Desktop\\Claude\\lead-gen-tool\\frontend",
+      "cwd": "C:\\Users\\Dell\\Desktop\\Claude\\projects\\acer-iq\\frontend",
       "port": 5173
     }
   ]

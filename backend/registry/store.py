@@ -38,10 +38,22 @@ def _rank(row: sqlite3.Row) -> tuple:
     )
 
 
-def search(location: str, entity_type: str = "All", limit: int = 60) -> list[dict]:
+# Size tiers built on real RBI classifications:
+#   large = RBI Upper/Middle-layer NBFCs (≥ ₹1,000 cr assets), Scheduled UCBs,
+#           Small Finance Banks, ARCs
+#   small = Base-layer NBFCs (< ₹1,000 cr assets), non-scheduled UCBs
+_SIZE_CLAUSE = {
+    "large": "(layer IN ('Middle','Upper','Top') OR sub_type IN ('UCB-Scheduled','SFB','ARC'))",
+    "small": "(layer = 'Base' OR sub_type = 'UCB')",
+}
+
+
+def search(location: str, entity_type: str = "All", limit: int = 60,
+           size: str = "All") -> list[dict]:
     """
     location: city name or 6-digit pincode.
     entity_type: Banks | NBFCs | All  (Corporates are not in the registry yet).
+    size: All | large | small  (see _SIZE_CLAUSE).
     """
     if not available():
         log.warning("registry.sqlite missing — run python -m backend.registry.ingest")
@@ -58,18 +70,20 @@ def search(location: str, entity_type: str = "All", limit: int = 60) -> list[dic
     if type_clause is None:
         return []
 
+    size_clause = _SIZE_CLAUSE.get((size or "All").lower(), "1=1")
+
     with _connect() as con:
         if is_pin:
             # Same sorting-district (first 3 digits) ≈ same city area
             rows = con.execute(
                 f"""SELECT * FROM companies
-                    WHERE {type_clause} AND pincode LIKE ?""",
+                    WHERE {type_clause} AND {size_clause} AND pincode LIKE ?""",
                 (loc[:3] + "%",),
             ).fetchall()
         else:
             rows = con.execute(
                 f"""SELECT * FROM companies
-                    WHERE {type_clause}
+                    WHERE {type_clause} AND {size_clause}
                       AND (city = ? COLLATE NOCASE
                            OR rbi_region = ? COLLATE NOCASE
                            OR address LIKE ? COLLATE NOCASE)""",
@@ -108,6 +122,70 @@ def search(location: str, entity_type: str = "All", limit: int = 60) -> list[dic
             "discovery_source": "rbi_registry",
         })
     return out
+
+
+def _badge(row: sqlite3.Row) -> str:
+    sub = row["sub_type"]
+    label = {"SFB": "Small Finance Bank", "UCB-Scheduled": "Scheduled UCB",
+             "UCB": "Co-operative Bank"}.get(sub, sub)
+    if row["layer"]:
+        label = f"{label} · {row['layer']} layer" if label else f"{row['layer']} layer"
+    return label
+
+
+def suggest(q: str, limit: int = 12) -> list[dict]:
+    """Name autocomplete over the whole RBI registry. Instant, offline."""
+    if not available() or len(q.strip()) < 2:
+        return []
+    needle = q.strip()
+    with _connect() as con:
+        rows = con.execute(
+            """SELECT * FROM companies
+               WHERE name LIKE ? COLLATE NOCASE
+               ORDER BY CASE WHEN name LIKE ? COLLATE NOCASE THEN 0 ELSE 1 END,
+                        length(name)
+               LIMIT ?""",
+            (f"%{needle}%", f"{needle}%", limit),
+        ).fetchall()
+    return [{
+        "name": r["name"],
+        "cin": r["cin"] or "",
+        "bse_code": "",
+        "sector": " · ".join(x for x in (_badge(r), r["city"]) if x),
+        "source": "rbi_registry",
+    } for r in rows]
+
+
+def get_by_name(name: str) -> dict | None:
+    """Exact-ish registry lookup for Company Research."""
+    if not available() or not name.strip():
+        return None
+    n = name.strip()
+    with _connect() as con:
+        row = con.execute(
+            "SELECT * FROM companies WHERE name = ? COLLATE NOCASE", (n,)
+        ).fetchone()
+        if row is None:
+            row = con.execute(
+                """SELECT * FROM companies WHERE name LIKE ? COLLATE NOCASE
+                   ORDER BY length(name) LIMIT 1""",
+                (f"%{n}%",),
+            ).fetchone()
+        if row is None and len(n) == 21:  # CIN lookup
+            row = con.execute(
+                "SELECT * FROM companies WHERE cin = ? COLLATE NOCASE", (n,)
+            ).fetchone()
+    if row is None:
+        return None
+    return {
+        "name": row["name"], "cin": row["cin"] or "",
+        "address": row["address"] or "", "city": row["city"] or "",
+        "state": row["state"] or "", "email": row["email"] or "",
+        "entity_type": "Bank" if row["entity_type"] == "Bank" else row["entity_type"],
+        "sub_type": _badge(row), "layer": row["layer"] or "",
+        "deposit_taking": bool(row["deposit_taking"]),
+        "source": "RBI registry",
+    }
 
 
 def stats() -> dict:

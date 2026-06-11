@@ -211,6 +211,11 @@ export default function CompanyCard({ company, onClose }) {
                   {company.entity_type}
                 </span>
               )}
+              {company.sub_type && (
+                <span className="inline-flex rounded-full border border-gray-200 bg-gray-50 px-2.5 py-0.5 text-[11px] font-medium text-gray-600">
+                  {company.sub_type}{company.layer ? ` · ${company.layer}` : ""}
+                </span>
+              )}
               <LeadScore label={company.score_label} score={company.score} size="lg" />
             </div>
           </div>
@@ -270,7 +275,15 @@ export default function CompanyCard({ company, onClose }) {
         }>
           <div className="space-y-2">
             <InfoRow label="Address" value={company.address} />
-            <InfoRow label="CIN" value={company.cin || "Not found"} />
+            <InfoRow
+              label="CIN"
+              value={
+                company.cin ||
+                (company.sub_type?.includes("UCB") || company.sub_type?.includes("Co-operative")
+                  ? "N/A — co-operative society (no CIN)"
+                  : "Not found")
+              }
+            />
             <InfoRow label="Incorporated" value={company.incorporation_date || "—"} />
           </div>
         </Section>

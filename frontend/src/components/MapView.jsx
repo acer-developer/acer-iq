@@ -84,11 +84,22 @@ function FlyController({ lat, lng }) {
   const map  = useMap();
   const prev = useRef(null);
   useEffect(() => {
-    if (!lat || !lng) return;
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
     const key = `${lat.toFixed(3)},${lng.toFixed(3)}`;
     if (prev.current === key) return;
     prev.current = key;
-    map.flyTo([lat, lng], 12, { animate: true, duration: 1.2 });
+    try {
+      map.invalidateSize();
+      const size = map.getSize();
+      if (!size.x || !size.y) {
+        // Container not laid out yet — flyTo would compute NaN and crash
+        map.setView([lat, lng], 12, { animate: false });
+      } else {
+        map.flyTo([lat, lng], 12, { animate: true, duration: 1.2 });
+      }
+    } catch {
+      try { map.setView([lat, lng], 12, { animate: false }); } catch { /* map gone */ }
+    }
   }, [lat, lng, map]);
   return null;
 }
@@ -166,8 +177,8 @@ export default function MapView({
           <FlyController lat={cityLat} lng={cityLng} />
         )}
 
-        {/* Company pins */}
-        {companies.map((company) => {
+        {/* Company pins — skip any without valid coordinates */}
+        {companies.filter((c) => Number.isFinite(c.lat) && Number.isFinite(c.lng)).map((company) => {
           const color      = ENTITY_COLORS[company.entity_type] ?? ENTITY_COLORS["Financial Entity"];
           const isSelected = company.id === selectedId;
           const w = isSelected ? 36 : 30;
@@ -212,7 +223,7 @@ export default function MapView({
         })}
 
         {/* Branch / office pins */}
-        {officeLocations?.map((office, i) => {
+        {officeLocations?.filter((o) => Number.isFinite(o.lat) && Number.isFinite(o.lng)).map((office, i) => {
           const isHQ = office.location_type === "HQ" || office.location_type === "Head Office";
           return (
             <Marker

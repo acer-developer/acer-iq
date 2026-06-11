@@ -319,6 +319,7 @@ async def discover_companies(
     industry: str = "",
     entity_type: str = "All",
     instrument_type: str = "All",
+    size: str = "All",
 ) -> tuple[list[dict], float, float]:
     lat, lng = await _geocode(city)
 
@@ -329,7 +330,7 @@ async def discover_companies(
     from backend.registry import store as registry_store
     companies: list[dict] = []
     if entity_type in ("Banks", "NBFCs", "All"):
-        companies = registry_store.search(city, entity_type, limit=60)
+        companies = registry_store.search(city, entity_type, limit=60, size=size)
 
     # ── Secondary: OSM/Places for Corporates (or registry miss) ─────────────
     need_osm = (

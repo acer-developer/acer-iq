@@ -16,6 +16,14 @@ const INSTRUMENTS = [
   { value: "Debt", label: "Debt Placement" },
 ];
 
+// Size tiers from RBI scale-based regulation:
+// NBFC Middle/Upper layer = ≥ ₹1,000 cr assets; Scheduled UCBs & SFBs = larger banks
+const SIZES = [
+  { value: "All",   label: "All Sizes" },
+  { value: "large", label: "Large (₹1,000cr+ / Scheduled)" },
+  { value: "small", label: "Small (< ₹1,000cr)" },
+];
+
 function FieldLabel({ children }) {
   return (
     <span className="mb-1 block text-[11px] font-semibold uppercase tracking-wider text-gray-400">
@@ -68,6 +76,7 @@ export default function SearchBar({ onSearch, loading }) {
   const [usePin, setUsePin] = useState(false);
   const [entityType, setEntityType] = useState("All");
   const [instrumentType, setInstrumentType] = useState("All");
+  const [size, setSize] = useState("All");
 
   const cities = state ? INDIA_STATES_CITIES[state] ?? [] : [];
 
@@ -88,7 +97,7 @@ export default function SearchBar({ onSearch, loading }) {
     e.preventDefault();
     if (!isValid) return;
     const location = usePin ? pincode : `${city}, ${state}`;
-    onSearch(location, entityType, instrumentType);
+    onSearch(location, entityType, instrumentType, size);
   };
 
   return (
@@ -200,6 +209,22 @@ export default function SearchBar({ onSearch, loading }) {
               <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                 <path strokeLinecap="round" strokeLinejoin="round"
                   d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+              </svg>
+            }
+          />
+        </div>
+
+        {/* Size */}
+        <div className="min-w-[170px] flex-1">
+          <FieldLabel>Company Size</FieldLabel>
+          <SelectField
+            value={size}
+            onChange={setSize}
+            options={SIZES}
+            icon={
+              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round"
+                  d="M3 6l3 1m0 0l-3 9a5.002 5.002 0 006.001 0M6 7l3 9M6 7l6-2m6 2l3-1m-3 1l-3 9a5.002 5.002 0 006.001 0M18 7l3 9m-3-9l-6-2m0-2v2m0 16V5m0 16H9m3 0h3" />
               </svg>
             }
           />

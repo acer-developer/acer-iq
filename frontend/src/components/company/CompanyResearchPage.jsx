@@ -107,12 +107,20 @@ function CompanySearchInput({ onSearch, loading }) {
                   </div>
                   <div className="min-w-0 flex-1">
                     <div className="truncate text-sm font-semibold text-gray-900">{s.name}</div>
-                    <div className="flex items-center gap-2 mt-0.5">
+                    <div className="flex items-center gap-2 mt-0.5 flex-wrap">
+                      {s.cin && (
+                        <span className="text-[10px] text-gray-400 font-mono">{s.cin}</span>
+                      )}
                       {s.bse_code && (
                         <span className="text-[10px] text-gray-400 font-mono">BSE: {s.bse_code}</span>
                       )}
                       {s.sector && (
-                        <span className="text-[10px] text-gray-400">· {s.sector}</span>
+                        <span className="text-[10px] text-gray-400">{s.sector}</span>
+                      )}
+                      {s.source === "rbi_registry" && (
+                        <span className="rounded bg-emerald-50 px-1 py-px text-[9px] font-bold text-emerald-600 border border-emerald-100">
+                          RBI
+                        </span>
                       )}
                     </div>
                   </div>
@@ -126,7 +134,7 @@ function CompanySearchInput({ onSearch, loading }) {
           )}
         </div>
         <p className="mt-1 text-[11px] text-gray-400">
-          Type to search BSE-listed companies · or paste a 21-character CIN
+          Searches 10,500+ RBI-registered NBFCs &amp; banks + BSE-listed companies · or paste a 21-character CIN
         </p>
       </div>
 
@@ -382,10 +390,12 @@ function CompanyInfo({ company }) {
       <h2 className="text-base font-bold text-gray-900">{company.name}</h2>
       <div className="mt-2 flex flex-wrap gap-4 text-xs">
         {[
-          { label: "Type",         value: company.entity_type },
+          { label: "Type",         value: [company.entity_type, company.sub_type].filter(Boolean).join(" · ") },
           { label: "CIN",          value: company.cin },
           { label: "Incorporated", value: company.incorporation_date },
+          { label: "Email",        value: company.email },
           { label: "Location",     value: company.address?.split(",").slice(0, 2).join(",") },
+          { label: "Source",       value: company.data_source },
         ].filter(x => x.value).map(({ label, value }) => (
           <div key={label}>
             <span className="text-gray-400">{label}: </span>
@@ -393,6 +403,33 @@ function CompanyInfo({ company }) {
           </div>
         ))}
       </div>
+
+      {company.directors?.length > 0 && (
+        <div className="mt-3 border-t border-gray-100 pt-3">
+          <div className="mb-1.5 text-[10px] font-bold uppercase tracking-wider text-gray-400">
+            Management &amp; Board
+          </div>
+          <div className="flex flex-wrap gap-1.5">
+            {company.directors.map((d, i) => (
+              <a
+                key={i}
+                href={`https://www.linkedin.com/search/results/people/?keywords=${encodeURIComponent(`${d.name} ${company.name}`)}`}
+                target="_blank" rel="noreferrer"
+                className="group inline-flex items-center gap-1.5 rounded-full border border-gray-200 bg-gray-50
+                  px-2.5 py-1 text-xs text-gray-700 transition hover:border-blue-300 hover:bg-blue-50"
+                title={`${d.designation || "Director"} — search on LinkedIn`}
+              >
+                <span className="font-medium">{d.name}</span>
+                {d.designation && (
+                  <span className="text-[10px] text-gray-400 group-hover:text-blue-500">
+                    {d.designation}
+                  </span>
+                )}
+              </a>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

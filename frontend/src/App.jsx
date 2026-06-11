@@ -68,21 +68,42 @@ export default function App() {
     setSelectedId(id);
     setDetailOpen(true);
     const comp = companies.find((c) => c.id === id);
-    if (!comp || comp.office_locations?.length || officesFetched.current.has(id)) return;
+    if (!comp || officesFetched.current.has(id)) return;
     officesFetched.current.add(id);
-    fetch(apiUrl(`/api/offices/${encodeURIComponent(comp.name)}?lat=${comp.lat}&lng=${comp.lng}`))
-      .then((r) => (r.ok ? r.json() : { offices: [] }))
-      .then((d) => {
-        if (d.offices?.length) {
-          setCompanies((prev) =>
-            prev.map((c) => (c.id === id ? { ...c, office_locations: d.offices } : c))
-          );
-        }
-      })
-      .catch(() => {});
+    if (!comp.office_locations?.length) {
+      fetch(apiUrl(`/api/offices/${encodeURIComponent(comp.name)}?lat=${comp.lat}&lng=${comp.lng}`))
+        .then((r) => (r.ok ? r.json() : { offices: [] }))
+        .then((d) => {
+          if (d.offices?.length) {
+            setCompanies((prev) =>
+              prev.map((c) => (c.id === id ? { ...c, office_locations: d.offices } : c))
+            );
+          }
+        })
+        .catch(() => {});
+    }
+    // Board of directors loads on demand too (BSE CorpInfo / Zauba)
+    if (!comp.directors?.length) {
+      fetch(apiUrl(`/api/directors/${encodeURIComponent(comp.name)}`))
+        .then((r) => (r.ok ? r.json() : { directors: [] }))
+        .then((d) => {
+          if (d.directors?.length || d.cin) {
+            setCompanies((prev) =>
+              prev.map((c) => (c.id === id
+                ? {
+                    ...c,
+                    directors: d.directors?.length ? d.directors : c.directors,
+                    cin: c.cin || d.cin || "",
+                  }
+                : c))
+            );
+          }
+        })
+        .catch(() => {});
+    }
   };
 
-  const handleSearch = async (location, entityType, instrumentType) => {
+  const handleSearch = async (location, entityType, instrumentType, size = "All") => {
     setLoading(true);
     setError("");
     setSelectedId(null);
@@ -99,6 +120,7 @@ export default function App() {
           city: location,
           entity_type: entityType,
           instrument_type: instrumentType,
+          size,
           industry: `${entityType} — ${instrumentType}`,
         }),
       });

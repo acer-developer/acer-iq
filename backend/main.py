@@ -25,6 +25,7 @@ from backend.pipeline.office_locator import find_office_locations
 from backend.pipeline.credit_history import fetch_credit_history
 from backend.pipeline.fit_analyzer import analyze_fit
 from backend import database
+from backend.registry import store as registry_store
 
 app = FastAPI(title="Lead Gen Tool", version="2.0.0")
 
@@ -56,7 +57,7 @@ async def search_leads(req: SearchRequest):
     industry = req.industry or f"{entity_type} — {instrument_type}"
 
     raw_companies, city_lat, city_lng = await discover_companies(
-        req.city, industry, entity_type, instrument_type
+        req.city, industry, entity_type, instrument_type, size=req.size or "All"
     )
     if not raw_companies:
         # Return empty result with city coordinates so map still zooms
@@ -202,45 +203,41 @@ async def search_leads(req: SearchRequest):
 
 @app.get("/api/company-suggest")
 async def company_suggest(q: str = ""):
-    """Return BSE-listed company suggestions matching the query."""
+    """Company suggestions: RBI registry first (10,500+ entities, instant,
+    includes CIN), BSE-listed companies appended when BSE is reachable."""
     if len(q.strip()) < 2:
         return {"suggestions": []}
 
-    _headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-        "Referer": "https://www.bseindia.com/",
-        "Accept": "application/json, text/plain, */*",
-    }
+    suggestions = registry_store.suggest(q.strip(), limit=8)
+    seen = {s["name"].lower() for s in suggestions}
 
-    suggestions = []
-    try:
-        async with httpx.AsyncClient(timeout=6, headers=_headers) as client:
-            resp = await client.get(
+    # Supplement with BSE-listed companies (covers corporates outside RBI lists)
+    from backend.pipeline.bse_scraper import _bse_tripped, get_bse_client
+    if not _bse_tripped():
+        try:
+            resp = await get_bse_client().get(
                 "https://api.bseindia.com/BseIndiaAPI/api/SearchData/w",
                 params={
-                    "strText": q.strip(),
-                    "flag": "0",
-                    "Membertype": "S",
-                    "pageno": "1",
-                    "tab": "ALL",
+                    "strText": q.strip(), "flag": "0",
+                    "Membertype": "S", "pageno": "1", "tab": "ALL",
                 },
             )
             if resp.status_code == 200:
-                data = resp.json()
-                for item in (data.get("Table") or [])[:20]:
+                for item in (resp.json().get("Table") or [])[:10]:
                     name = (item.get("Scrip_Name") or item.get("SCRIP_NAME") or "").strip()
                     code = str(item.get("SCRIP_CD") or item.get("scripCd") or "")
                     sector = (item.get("SECTOR") or item.get("Sector") or "").strip()
-                    if name:
+                    if name and name.lower() not in seen:
                         suggestions.append({
-                            "name": name,
-                            "bse_code": code,
-                            "sector": sector,
+                            "name": name, "cin": "", "bse_code": code,
+                            "sector": sector or "BSE-listed",
+                            "source": "bse",
                         })
-    except Exception:
-        pass
+                        seen.add(name.lower())
+        except Exception:
+            pass
 
-    return {"suggestions": suggestions}
+    return {"suggestions": suggestions[:15]}
 
 
 # ── Company Credit History ────────────────────────────────────────────────────
@@ -259,23 +256,39 @@ async def company_credit(req: CompanyCreditRequest):
     # Detect CIN pattern (starts with L or U followed by digits and letters)
     is_cin = len(query) == 21 and query[0].upper() in ("L", "U")
 
-    # Fetch MCA data
-    company_info: dict = {}
-    if is_cin:
-        company_info["cin"] = query
-        company_info["name"] = query  # will be enriched below
-    else:
-        company_info["name"] = query
+    # 1) RBI registry — authoritative for NBFCs / co-op banks / SFBs / ARCs
+    reg = registry_store.get_by_name(query)
 
-    mca = await _safe(fetch_mca_data(query), {})
-    company_info.update({
-        "name": mca.get("name", query),
-        "cin": mca.get("cin", query if is_cin else ""),
-        "address": mca.get("registered_address", "India"),
-        "incorporation_date": mca.get("incorporation_date", ""),
-        "directors": mca.get("directors", []),
-        "entity_type": _guess_entity_type(query),
-    })
+    company_info: dict = {
+        "name": (reg or {}).get("name") or query,
+        "cin": (reg or {}).get("cin") or (query if is_cin else ""),
+        "address": (reg or {}).get("address", ""),
+        "email": (reg or {}).get("email", ""),
+        "entity_type": (reg or {}).get("entity_type") or _guess_entity_type(query),
+        "sub_type": (reg or {}).get("sub_type", ""),
+        "layer": (reg or {}).get("layer", ""),
+        "deposit_taking": (reg or {}).get("deposit_taking", False),
+        "data_source": "RBI registry" if reg else "",
+        "incorporation_date": "",
+        "directors": [],
+    }
+    if company_info["cin"] and len(company_info["cin"]) == 21:
+        year = company_info["cin"][8:12]
+        if year.isdigit():
+            company_info["incorporation_date"] = year
+
+    # 2) BSE/Zauba — listing data, directors, registered address
+    mca = await _safe(fetch_mca_data(company_info["name"]), {})
+    if mca.get("cin") and not company_info["cin"]:
+        company_info["cin"] = mca["cin"]
+    if mca.get("registered_address") and not company_info["address"]:
+        company_info["address"] = mca["registered_address"]
+    if mca.get("directors"):
+        company_info["directors"] = mca["directors"]
+    if mca.get("incorporation_date") and not company_info["incorporation_date"]:
+        company_info["incorporation_date"] = mca["incorporation_date"]
+    if not company_info["address"]:
+        company_info["address"] = "India"
 
     # Fetch credit history from BSE
     search_name = company_info["name"] if company_info["name"] != query else query
@@ -313,6 +326,20 @@ def _guess_entity_type(name: str) -> str:
     if any(w in n for w in ["NBFC", "FINANCE", "FINSERV", "CAPITAL", "LEASING", "HOUSING"]):
         return "NBFC"
     return "Corporate"
+
+
+# ── Directors on demand (Find Leads drill-down) ──────────────────────────────
+
+@app.get("/api/directors/{company_name}")
+async def get_directors(company_name: str):
+    """Board of directors for a selected lead — BSE CorpInfo for listed
+    companies, Zauba for private ones. Cached + circuit-breaker protected."""
+    mca = await _safe(fetch_mca_data(company_name), {})
+    return {
+        "directors": mca.get("directors", []),
+        "cin": mca.get("cin", ""),
+        "incorporation_date": mca.get("incorporation_date", ""),
+    }
 
 
 # ── Offices & Instruments on demand ──────────────────────────────────────────
