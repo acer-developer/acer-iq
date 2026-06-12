@@ -1,34 +1,29 @@
+import logging
+
+from backend.netutil import SourceStatus
 from backend.pipeline.llm import chat, parse_json
 
-SCORE_PROMPT = """\
-You are a business development analyst at ACER, an Indian SEBI-registered credit rating agency.
-Given this company profile, score it 0-100 on likelihood of needing credit rating services for {instrument_type}.
+log = logging.getLogger("acer_iq.scorer")
 
-Company: {name}
-Entity Type: {entity_type}
-Target Instrument: {instrument_type}
-City: {city}
-CIN: {cin}
-Incorporated: {incorporation_date}
-BSE Instruments Found: {instrument_count}
-Already rated by ACER: {acer_rated}
-Currently rated by: {rated_by}
+# One prompt scores the whole search (P4 fix: 1 LLM call per search, not 30)
+BATCH_SCORE_PROMPT = """\
+You are a business development analyst at ACER, an Indian SEBI-registered credit rating agency.
+Score each company below 0-100 on likelihood of needing credit rating services for {instrument_type} in {city}.
 
 Context:
 - Banks need ratings for AT1 bonds, tier-2 bonds, infrastructure bonds
 - NBFCs need ratings for NCDs, commercial paper, securitisation
 - Corporates need ratings for NCDs, bonds, commercial paper, IPO grading
+- "Already rated by ACER" = renewal/cross-sell; "rated by competitors" = second-opinion pitch
 
-Respond ONLY in this exact JSON (no markdown, no extra text):
-{{
-  "score": 85,
-  "score_label": "Hot Lead",
-  "why_quality_lead": ["specific reason 1", "specific reason 2", "specific reason 3"],
-  "pain_points": ["specific pain 1", "specific pain 2"],
-  "recommended_approach": "One specific pitch approach for this company"
-}}
+Companies (index | name | type | RBI layer/sub-type | BSE instruments | rated by | ACER client):
+{company_lines}
 
-score_label: 80-100="Hot Lead", 60-79="Warm Lead", 40-59="Potential", 0-39="Low Priority"\
+Respond ONLY with a JSON array, one object per company, no markdown:
+[
+  {{"i": 0, "score": 85, "why_quality_lead": ["reason 1", "reason 2"],
+    "pain_points": ["pain 1"], "recommended_approach": "one specific pitch"}}
+]
 """
 
 
@@ -170,50 +165,76 @@ def _rule_based_score(company: dict) -> dict:
     return company
 
 
-async def score_company(
-    company: dict,
-    industry: str,
-    city: str,
-    entity_type: str = "Financial Entity",
-    instrument_type: str = "All",
-) -> dict:
-    # Always run rule-based first — gives real data-driven scores immediately
-    company = _rule_based_score(company)
-
-    # If OpenRouter key is configured, try to enrich with AI
-    instruments  = company.get("past_instruments", [])
-    rated_by     = list({
+def _company_line(i: int, company: dict) -> str:
+    instruments = company.get("past_instruments", [])
+    rated_by = sorted({
         inst.get("rating_agency", "") for inst in instruments
         if inst.get("rating_agency")
     })
-    acer_rated   = any(
-        any(a in r.upper() for a in ("INFOMERICS", "IVR", "ACER"))
-        for r in rated_by
+    acer = any(
+        any(a in r.upper() for a in ("INFOMERICS", "IVR", "ACER")) for r in rated_by
     )
+    sub = company.get("registry_layer") or company.get("registry_sub_type") or "-"
+    return (f"{i} | {company.get('name', '?')} | {company.get('entity_type', '?')} | {sub} | "
+            f"{len(instruments)} | {', '.join(rated_by[:3]) or 'none'} | "
+            f"{'yes' if acer else 'no'}")
 
-    prompt = SCORE_PROMPT.format(
-        name=company.get("name", ""),
-        entity_type=entity_type,
-        instrument_type=instrument_type,
-        city=city,
-        cin=company.get("cin", "N/A"),
-        incorporation_date=company.get("incorporation_date", "N/A"),
-        instrument_count=len(instruments),
-        acer_rated="Yes" if acer_rated else "No",
-        rated_by=", ".join(rated_by[:4]) if rated_by else "None found on BSE",
-    )
 
-    raw    = await chat(prompt, max_tokens=512)
-    parsed = parse_json(raw) if raw else None
-
-    if parsed and isinstance(parsed.get("score"), (int, float)):
-        score = int(parsed["score"])
-        company.update({
-            "score":                score,
-            "score_label":          _label(score),
-            "why_quality_lead":     parsed.get("why_quality_lead", company["why_quality_lead"]),
-            "pain_points":          parsed.get("pain_points", company["pain_points"]),
-            "recommended_approach": parsed.get("recommended_approach", company["recommended_approach"]),
+def apply_batch_scores(companies: list[dict], parsed) -> int:
+    """Apply a parsed batch-LLM response onto companies. Returns #applied."""
+    if not isinstance(parsed, list):
+        return 0
+    applied = 0
+    for item in parsed:
+        if not isinstance(item, dict):
+            continue
+        i = item.get("i")
+        score = item.get("score")
+        if not isinstance(i, int) or not 0 <= i < len(companies):
+            continue
+        if not isinstance(score, (int, float)):
+            continue
+        c = companies[i]
+        c.update({
+            "score":                int(score),
+            "score_label":          _label(int(score)),
+            "why_quality_lead":     item.get("why_quality_lead") or c.get("why_quality_lead", []),
+            "pain_points":          item.get("pain_points") or c.get("pain_points", []),
+            "recommended_approach": item.get("recommended_approach") or c.get("recommended_approach", ""),
         })
+        applied += 1
+    return applied
 
-    return company
+
+async def score_companies(
+    companies: list[dict],
+    industry: str,
+    city: str,
+    instrument_type: str = "All",
+    status: SourceStatus | None = None,
+    max_llm_companies: int = 40,
+) -> list[dict]:
+    """
+    Score a whole search result set: rule-based score for every company,
+    then a SINGLE batched LLM call refines the top slice (if a key is set).
+    """
+    for c in companies:
+        _rule_based_score(c)
+
+    if not companies:
+        return companies
+
+    batch = companies[:max_llm_companies]
+    lines = "\n".join(_company_line(i, c) for i, c in enumerate(batch))
+    prompt = BATCH_SCORE_PROMPT.format(
+        instrument_type=instrument_type, city=city, company_lines=lines,
+    )
+    raw = await chat(prompt, max_tokens=120 * len(batch), status=status)
+    parsed = parse_json(raw) if raw else None
+    applied = apply_batch_scores(batch, parsed)
+    if raw and not applied:
+        log.warning("batch LLM scoring returned unusable output (%d companies)", len(batch))
+    elif applied:
+        log.info("batch LLM scoring applied to %d/%d companies", applied, len(batch))
+
+    return companies

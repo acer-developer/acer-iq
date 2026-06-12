@@ -1,5 +1,9 @@
 import json
+import logging
+
 from backend.config import settings
+
+log = logging.getLogger("acer_iq.db")
 
 _client = None
 
@@ -13,7 +17,8 @@ def get_client():
     try:
         from supabase import create_client
         _client = create_client(settings.supabase_url, settings.supabase_key)
-    except Exception:
+    except Exception as exc:
+        log.warning("supabase client init failed: %r", exc)
         _client = None
     return _client
 
@@ -29,8 +34,8 @@ def save_search(search_id: str, city: str, industry: str, companies: list):
             "industry": industry,
             "results": json.dumps([c.model_dump() for c in companies]),
         }).execute()
-    except Exception:
-        pass
+    except Exception as exc:
+        log.warning("save_search failed for %s: %r", search_id, exc)
 
 
 def load_search(search_id: str):
@@ -41,6 +46,6 @@ def load_search(search_id: str):
         res = client.table("searches").select("*").eq("id", search_id).execute()
         if res.data:
             return res.data[0]
-    except Exception:
-        pass
+    except Exception as exc:
+        log.warning("load_search failed for %s: %r", search_id, exc)
     return None

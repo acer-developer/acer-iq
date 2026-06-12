@@ -1,0 +1,36 @@
+{
+  "Table": [
+    {
+      "sFirstname": "Umesh",
+      "sLastname": "Revankar",
+      "sDIN": "00141189",
+      "sDesignation": "Executive Vice Chairman"
+    },
+    {
+      "sFirstname": "Y S",
+      "sLastname": "Chakravarti",
+      "sDIN": "00052308",
+      "sDesignation": "Managing Director & CEO"
+    },
+    {
+      "sFirstname": "",
+      "sLastname": "",
+      "sDIN": "",
+      "sDesignation": "Director"
+    }
+  ],
+  "Table1": [
+    {
+      "Address": "Sri Towers, Plot No 14A, South Phase, Industrial Estate, Guindy",
+      "City": "Chennai",
+      "State": "Tamil Nadu"
+    }
+  ],
+  "Table3": [
+    {
+      "fld_cin": "L65191TN1979PLC007874",
+      "fld_industry": "Finance (including NBFCs)",
+      "lISTING_DATE": "1995-07-12T00:00:00"
+    }
+  ]
+}

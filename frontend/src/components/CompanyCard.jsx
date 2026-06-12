@@ -271,7 +271,10 @@ export default function CompanyCard({ company, onClose }) {
           <div className="space-y-2">
             <InfoRow label="Address" value={company.address} />
             <InfoRow label="CIN" value={company.cin || "Not found"} />
-            <InfoRow label="Incorporated" value={company.incorporation_date || "—"} />
+            <InfoRow
+              label={company.incorporation_date ? "Incorporated" : "BSE listed"}
+              value={company.incorporation_date || company.listing_date || "—"}
+            />
           </div>
         </Section>
 

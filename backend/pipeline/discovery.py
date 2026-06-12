@@ -1,11 +1,21 @@
+import logging
+
 import httpx
+
 from backend.config import settings
+from backend.netutil import SourceStatus, cache, limiter
+from backend.registry.geo import CITY_COORDS as _CITY_COORDS
+
+log = logging.getLogger("acer_iq.discovery")
 
 PLACES_BASE  = "https://maps.googleapis.com/maps/api/place"
 NOMINATIM    = "https://nominatim.openstreetmap.org/search"
 OVERPASS_URL = "https://overpass-api.de/api/interpreter"
 
-_HEADERS = {"User-Agent": "AcerIQ/1.0 (credit-rating-lead-tool; contact@acerratings.com)"}
+GEOCODE_TTL = 7 * 24 * 3600
+OVERPASS_TTL = 6 * 3600
+
+_HEADERS = {"User-Agent": "ACER-IQ/2.0 (credit-rating-lead-tool; contact@acerratings.com)"}
 
 _ENTITY_LABEL = {
     "Banks": "Bank", "NBFCs": "NBFC", "Corporates": "Corporate", "All": "Financial Entity",
@@ -29,66 +39,7 @@ _LARGE_BANKS_BLOCKLIST = {
     "rajasthan marudhara gramin bank",  # example RRBs that are already well-rated
 }
 
-# ── Hardcoded coords for major Indian cities ──────────────────────────────────
-_CITY_COORDS: dict[str, tuple[float, float]] = {
-    "mumbai": (19.0760, 72.8777), "delhi": (28.6139, 77.2090),
-    "new delhi": (28.6139, 77.2090), "bengaluru": (12.9716, 77.5946),
-    "bangalore": (12.9716, 77.5946), "hyderabad": (17.3850, 78.4867),
-    "chennai": (13.0827, 80.2707), "kolkata": (22.5726, 88.3639),
-    "pune": (18.5204, 73.8567), "ahmedabad": (23.0225, 72.5714),
-    "jaipur": (26.9124, 75.7873), "lucknow": (26.8467, 80.9462),
-    "kanpur": (26.4499, 80.3319), "nagpur": (21.1458, 79.0882),
-    "visakhapatnam": (17.6868, 83.2185), "vizag": (17.6868, 83.2185),
-    "indore": (22.7196, 75.8577), "thane": (19.2183, 72.9781),
-    "bhopal": (23.2599, 77.4126), "patna": (25.6093, 85.1236),
-    "vadodara": (22.3072, 73.1812), "ghaziabad": (28.6692, 77.4538),
-    "ludhiana": (30.9010, 75.8573), "agra": (27.1767, 78.0081),
-    "nashik": (19.9975, 73.7898), "varanasi": (25.3176, 82.9739),
-    "meerut": (28.9845, 77.7064), "rajkot": (22.3039, 70.8022),
-    "srinagar": (34.0837, 74.7973), "aurangabad": (19.8762, 75.3433),
-    "dhanbad": (23.7957, 86.4304), "amritsar": (31.6340, 74.8723),
-    "navi mumbai": (19.0330, 73.0297), "allahabad": (25.4358, 81.8463),
-    "prayagraj": (25.4358, 81.8463), "howrah": (22.5958, 88.2636),
-    "ranchi": (23.3441, 85.3096), "gwalior": (26.2183, 78.1828),
-    "jabalpur": (23.1815, 79.9864), "coimbatore": (11.0168, 76.9558),
-    "vijayawada": (16.5062, 80.6480), "jodhpur": (26.2389, 73.0243),
-    "madurai": (9.9252, 78.1198), "raipur": (21.2514, 81.6296),
-    "kota": (25.2138, 75.8648), "chandigarh": (30.7333, 76.7794),
-    "guwahati": (26.1445, 91.7362), "solapur": (17.6599, 75.9064),
-    "hubli": (15.3647, 75.1240), "hubballi": (15.3647, 75.1240),
-    "mysuru": (12.2958, 76.6394), "mysore": (12.2958, 76.6394),
-    "tiruchirappalli": (10.7905, 78.7047), "trichy": (10.7905, 78.7047),
-    "bareilly": (28.3670, 79.4304), "aligarh": (27.8974, 78.0880),
-    "moradabad": (28.8389, 78.7768), "gorakhpur": (26.7606, 83.3732),
-    "bikaner": (28.0229, 73.3119), "amravati": (20.9374, 77.7796),
-    "noida": (28.5355, 77.3910), "jamshedpur": (22.8046, 86.2029),
-    "bhilai": (21.2094, 81.3784), "cuttack": (20.4625, 85.8830),
-    "kochi": (9.9312, 76.2673), "nellore": (14.4426, 79.9865),
-    "bhavnagar": (21.7645, 72.1519), "dehradun": (30.3165, 78.0322),
-    "durgapur": (23.5204, 87.3119), "asansol": (23.6739, 86.9524),
-    "rourkela": (22.2604, 84.8536), "nanded": (19.1383, 77.3210),
-    "kolhapur": (16.7050, 74.2433), "ajmer": (26.4499, 74.6399),
-    "gulbarga": (17.3297, 76.8343), "latur": (18.4088, 76.5604),
-    "mangaluru": (12.9141, 74.8560), "mangalore": (12.9141, 74.8560),
-    "erode": (11.3410, 77.7172), "tiruppur": (11.1085, 77.3411),
-    "shimla": (31.1048, 77.1734), "gangtok": (27.3389, 88.6065),
-    "panaji": (15.4909, 73.8278), "goa": (15.4909, 73.8278),
-    "imphal": (24.8170, 93.9368), "shillong": (25.5788, 91.8933),
-    "puducherry": (11.9416, 79.8083), "pondicherry": (11.9416, 79.8083),
-    "surat": (21.1702, 72.8311), "gandhinagar": (23.2156, 72.6369),
-    "thiruvananthapuram": (8.5241, 76.9366), "kozhikode": (11.2588, 75.7804),
-    "thrissur": (10.5276, 76.2144), "salem": (11.6643, 78.1460),
-    "tirunelveli": (8.7139, 77.7567), "vellore": (12.9165, 79.1325),
-    "warangal": (17.9784, 79.5941), "guntur": (16.3067, 80.4365),
-    "udaipur": (24.5854, 73.7125), "bhubaneswar": (20.2961, 85.8245),
-    "siliguri": (26.7271, 88.3953), "jammu": (32.7266, 74.8570),
-    "rohtak": (28.8955, 76.6066), "panipat": (29.3909, 76.9635),
-    "mathura": (27.4924, 77.6737), "bilaspur": (22.0797, 82.1409),
-    "sangli": (16.8524, 74.5815), "ujjain": (23.1765, 75.7885),
-    "secunderabad": (17.4399, 78.4983), "bellary": (15.1394, 76.9214),
-    "faridabad": (28.4089, 77.3178), "gurugram": (28.4595, 77.0266),
-    "gurgaon": (28.4595, 77.0266),
-}
+# City centroids come from backend.registry.geo (shared with the registry).
 
 
 def _parse_city(location: str) -> str:
@@ -97,37 +48,48 @@ def _parse_city(location: str) -> str:
 
 # ── Geocoding ─────────────────────────────────────────────────────────────────
 
-async def _geocode(location: str) -> tuple[float, float]:
+async def _nominatim(params: dict, status: SourceStatus | None) -> tuple[float, float] | None:
+    try:
+        async with limiter("geocode"):
+            async with httpx.AsyncClient(timeout=10, headers=_HEADERS) as client:
+                resp = await client.get(NOMINATIM, params=params)
+        results = resp.json()
+        if status:
+            status.ok("geocode")
+        if results:
+            return float(results[0]["lat"]), float(results[0]["lon"])
+    except Exception as exc:
+        log.warning("Nominatim geocode failed for %r: %r", params, exc)
+        if status:
+            status.fail("geocode", repr(exc))
+    return None
+
+
+async def _geocode(location: str, status: SourceStatus | None = None) -> tuple[float, float]:
     city = _parse_city(location).lower()
     if city in _CITY_COORDS:
         return _CITY_COORDS[city]
 
-    try:
-        async with httpx.AsyncClient(timeout=10, headers=_HEADERS) as client:
-            resp = await client.get(NOMINATIM, params={
-                "q": f"{location}, India", "format": "json",
-                "limit": 1, "countrycodes": "in",
-            })
-            results = resp.json()
-            if results:
-                return float(results[0]["lat"]), float(results[0]["lon"])
-    except Exception:
-        pass
+    key = "geocode:" + location.strip().lower()
+    hit = cache.get(key)
+    if hit is not None:
+        return hit
+
+    coords = await _nominatim({
+        "q": f"{location}, India", "format": "json",
+        "limit": 1, "countrycodes": "in",
+    }, status)
 
     raw = location.strip()
-    if raw.isdigit() and len(raw) == 6:
-        try:
-            async with httpx.AsyncClient(timeout=10, headers=_HEADERS) as client:
-                resp = await client.get(NOMINATIM, params={
-                    "postalcode": raw, "country": "India",
-                    "format": "json", "limit": 1,
-                })
-                results = resp.json()
-                if results:
-                    return float(results[0]["lat"]), float(results[0]["lon"])
-        except Exception:
-            pass
+    if coords is None and raw.isdigit() and len(raw) == 6:
+        coords = await _nominatim({
+            "postalcode": raw, "country": "India",
+            "format": "json", "limit": 1,
+        }, status)
 
+    if coords is not None:
+        cache.set(key, coords, GEOCODE_TTL)
+        return coords
     return 20.5937, 78.9629
 
 
@@ -227,15 +189,29 @@ out center 60;"""
 # ── Overpass search ───────────────────────────────────────────────────────────
 
 async def _overpass_search(lat: float, lng: float, entity_type: str,
-                           radius: int = 15000) -> list[dict]:
+                           radius: int = 15000,
+                           status: SourceStatus | None = None) -> list[dict]:
     entity_label = _ENTITY_LABEL.get(entity_type, "Financial Entity")
     q = _build_overpass_query(lat, lng, entity_type, radius)
 
+    key = f"overpass:{entity_type}:{lat:.3f}:{lng:.3f}:{radius}"
+    cached_result = cache.get(key)
+    if cached_result is not None:
+        if status:
+            status.ok("overpass")
+        return cached_result
+
     try:
-        async with httpx.AsyncClient(timeout=35, headers=_HEADERS) as client:
-            resp = await client.post(OVERPASS_URL, data={"data": q})
-            data = resp.json()
-    except Exception:
+        async with limiter("overpass"):
+            async with httpx.AsyncClient(timeout=35, headers=_HEADERS) as client:
+                resp = await client.post(OVERPASS_URL, data={"data": q})
+        data = resp.json()
+        if status:
+            status.ok("overpass")
+    except Exception as exc:
+        log.warning("Overpass query failed (%s, r=%d): %r", entity_type, radius, exc)
+        if status:
+            status.fail("overpass", repr(exc))
         return []
 
     companies: list[dict] = []
@@ -305,6 +281,7 @@ async def _overpass_search(lat: float, lng: float, entity_type: str,
             "entity_type": entity,
         })
 
+    cache.set_result(key, companies, OVERPASS_TTL)
     return companies
 
 
@@ -319,8 +296,9 @@ async def discover_companies(
     industry: str = "",
     entity_type: str = "All",
     instrument_type: str = "All",
+    status: SourceStatus | None = None,
 ) -> tuple[list[dict], float, float]:
-    lat, lng = await _geocode(city)
+    lat, lng = await _geocode(city, status)
 
     # ── Primary: RBI registry (complete universe of head offices) ────────────
     # Banks → UCBs + SFBs; NBFCs → RBI-registered NBFCs/ARCs.
@@ -329,7 +307,13 @@ async def discover_companies(
     from backend.registry import store as registry_store
     companies: list[dict] = []
     if entity_type in ("Banks", "NBFCs", "All"):
-        companies = registry_store.search(city, entity_type, limit=60)
+        if registry_store.available():
+            companies = registry_store.search(city, entity_type, limit=60)
+            if status:
+                status.ok("rbi_registry")
+        elif status:
+            status.fail("rbi_registry", "registry.sqlite missing — run backend.registry.ingest")
+        log.info("registry: %d head offices for %r (%s)", len(companies), city, entity_type)
 
     # ── Secondary: OSM/Places for Corporates (or registry miss) ─────────────
     need_osm = (
@@ -339,11 +323,12 @@ async def discover_companies(
     )
     if need_osm:
         osm_type = "Corporates" if entity_type == "All" and companies else entity_type
-        osm = await _overpass_search(lat, lng, osm_type, radius=15000)
+        osm = await _overpass_search(lat, lng, osm_type, radius=15000, status=status)
         if len(companies) + len(osm) < 8:
-            wider = await _overpass_search(lat, lng, osm_type, radius=30000)
+            wider = await _overpass_search(lat, lng, osm_type, radius=30000, status=status)
             seen_osm = {c["name"].lower() for c in osm}
             osm += [c for c in wider if c["name"].lower() not in seen_osm]
+        log.info("overpass: %d companies for %r (%s)", len(osm), city, osm_type)
 
         seen = {c["name"].lower() for c in companies}
         for c in osm:
@@ -356,13 +341,17 @@ async def discover_companies(
     if not companies:
         api_key = settings.google_places_api_key
         if api_key and api_key not in ("your_key_here", ""):
-            companies = await _google_places_search(city, entity_type, api_key, lat, lng)
+            companies = await _google_places_search(city, entity_type, api_key, lat, lng,
+                                                    status=status)
+        elif status:
+            status.skip("google_places", "no API key configured")
 
     limit = 60 if any(c.get("discovery_source") == "rbi_registry" for c in companies) else 30
     return companies[:limit], lat, lng
 
 
-async def _google_places_search(city, entity_type, api_key, lat, lng):
+async def _google_places_search(city, entity_type, api_key, lat, lng,
+                                status: SourceStatus | None = None):
     _Q = {
         "Banks":      "bank",
         "NBFCs":      "NBFC finance company",
@@ -374,23 +363,28 @@ async def _google_places_search(city, entity_type, api_key, lat, lng):
     el = _ENTITY_LABEL.get(entity_type, "Financial Entity")
     companies = []
     try:
-        async with httpx.AsyncClient(timeout=20) as client:
-            resp = await client.get(
-                f"{PLACES_BASE}/textsearch/json",
-                params={"query": query, "key": api_key, "type": "establishment", "region": "in"},
-            )
-            for i, p in enumerate(resp.json().get("results", [])[:15]):
-                loc = p.get("geometry", {}).get("location", {})
-                companies.append({
-                    "id":          p.get("place_id", f"gp_{i}"),
-                    "name":        p.get("name", "?"),
-                    "address":     p.get("formatted_address", ""),
-                    "lat":         loc.get("lat", lat),
-                    "lng":         loc.get("lng", lng),
-                    "website":     "",
-                    "phone":       "",
-                    "entity_type": el,
-                })
-    except Exception:
-        pass
+        async with limiter("places"):
+            async with httpx.AsyncClient(timeout=20) as client:
+                resp = await client.get(
+                    f"{PLACES_BASE}/textsearch/json",
+                    params={"query": query, "key": api_key, "type": "establishment", "region": "in"},
+                )
+        if status:
+            status.ok("google_places")
+        for i, p in enumerate(resp.json().get("results", [])[:15]):
+            loc = p.get("geometry", {}).get("location", {})
+            companies.append({
+                "id":          p.get("place_id", f"gp_{i}"),
+                "name":        p.get("name", "?"),
+                "address":     p.get("formatted_address", ""),
+                "lat":         loc.get("lat", lat),
+                "lng":         loc.get("lng", lng),
+                "website":     "",
+                "phone":       "",
+                "entity_type": el,
+            })
+    except Exception as exc:
+        log.warning("Google Places search failed for %r: %r", query, exc)
+        if status:
+            status.fail("google_places", repr(exc))
     return companies

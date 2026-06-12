@@ -385,6 +385,7 @@ function CompanyInfo({ company }) {
           { label: "Type",         value: company.entity_type },
           { label: "CIN",          value: company.cin },
           { label: "Incorporated", value: company.incorporation_date },
+          { label: "BSE listed", value: company.listing_date },
           { label: "Location",     value: company.address?.split(",").slice(0, 2).join(",") },
         ].filter(x => x.value).map(({ label, value }) => (
           <div key={label}>

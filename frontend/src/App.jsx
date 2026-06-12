@@ -135,7 +135,7 @@ export default function App() {
             </svg>
           </div>
           <div>
-            <span className="text-sm font-bold text-gray-900">LeadRadar</span>
+            <span className="text-sm font-bold text-gray-900">ACER-IQ</span>
             <span className="ml-2 text-xs text-gray-400">Credit Rating Intelligence · India</span>
           </div>
           {companies.length > 0 && !loading && activeTab === "leads" && (

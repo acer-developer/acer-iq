@@ -1,0 +1,43 @@
+{
+  "Table": [
+    {
+      "ISIN_NO": "INE721A07PT4",
+      "SCRIP_NAME": "SHRIRAM FINANCE LIMITED SR PP 9/24 9.10 NCD 09JL27 FVRS1LAC",
+      "CATEGORY": "Non Convertible Debentures",
+      "FACE_VALUE": "100000",
+      "ISSUE_DATE": "09 Jul 2024",
+      "MATURITY_DATE": "09 Jul 2027",
+      "COUPON_RATE": "9.10",
+      "CREDIT_RATING": "CRISIL AA+/Stable",
+      "RATING_AGENCY": "CRISIL",
+      "STATUS": "Active",
+      "ISSUE_SIZE": "500"
+    },
+    {
+      "ISIN_NO": "INE721A07PU2",
+      "SCRIP_NAME": "SHRIRAM FINANCE LIMITED SR PP 10/24 9.05 NCD 11OC29",
+      "CATEGORY": "Non Convertible Debentures",
+      "FACE_VALUE": "100000",
+      "ISSUE_DATE": "11 Oct 2024",
+      "MATURITY_DATE": "11 Oct 2029",
+      "COUPON_RATE": "9.05",
+      "CREDIT_RATING": "IND AA+/Stable",
+      "RATING_AGENCY": "INDIA RATINGS",
+      "STATUS": "Active",
+      "ISSUE_SIZE": "350"
+    },
+    {
+      "ISIN": "INE721A07PV0",
+      "SecurityName": "SHRIRAM FINANCE LTD SR PP 11/24 NCD",
+      "Category": "Bond",
+      "FaceValue": "1000",
+      "IssueDate": "20 Dec 2024",
+      "REDEMPTION_DATE": "20 Dec 2026",
+      "CouponRate": "8.95",
+      "CreditRating": "IVR AA/Stable",
+      "RatingAgency": "INFOMERICS",
+      "Status": "Active",
+      "Amount": "200"
+    }
+  ]
+}

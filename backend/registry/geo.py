@@ -112,14 +112,19 @@ CITY_COORDS: dict[str, tuple[float, float]] = {
     "vasai": (19.4700, 72.8000), "virar": (19.4559, 72.8118),
     "kalyan": (19.2403, 73.1305), "dombivli": (19.2183, 73.0864),
     "pimpri": (18.6298, 73.7997), "pimpri-chinchwad": (18.6298, 73.7997),
+    # aliases used by the search box
+    "vizag": (17.6868, 83.2185), "trichy": (10.7905, 78.7047),
+    "hubballi": (15.3647, 75.1240), "goa": (15.4909, 73.8278),
+    "pondicherry": (11.9416, 79.8083),
 }
 
 _PIN_RE = re.compile(r"\b([1-9]\d{5})\b")
 
 
 def state_from_cin(cin: str) -> str:
-    if cin and len(cin) >= 9:
-        return CIN_STATE.get(cin[7:9].upper(), "")
+    # CIN layout: [LU] + 5-digit industry code + 2-letter ROC state at chars 7-8
+    if cin and len(cin) >= 8:
+        return CIN_STATE.get(cin[6:8].upper(), "")
     return ""
 
 

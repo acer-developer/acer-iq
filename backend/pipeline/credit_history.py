@@ -1,4 +1,4 @@
-import httpx
+from backend.netutil import SourceStatus
 from backend.pipeline.bse_scraper import fetch_past_instruments
 
 AGENCIES = [
@@ -73,12 +73,13 @@ def _latest_rating(instruments: list[dict]) -> str:
     return "—"
 
 
-async def fetch_credit_history(company_name: str, cin: str = "") -> dict:
+async def fetch_credit_history(company_name: str, cin: str = "",
+                               status: SourceStatus | None = None) -> dict:
     """
     Fetch all debt instruments for a company from BSE and map them
     across the 7 credit rating agencies.
     """
-    instruments = await fetch_past_instruments(company_name)
+    instruments = await fetch_past_instruments(company_name, status=status)
 
     agency_map: dict[str, list[dict]] = {ag["key"]: [] for ag in AGENCIES}
 

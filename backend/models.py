@@ -48,7 +48,8 @@ class Company(BaseModel):
     website: str = ""
     phone: str = ""
     cin: str = ""
-    incorporation_date: str = ""
+    incorporation_date: str = ""   # from MCA/Zauba only — never the BSE listing date
+    listing_date: str = ""         # BSE listing date (P6 fix: was mislabeled as incorporation)
     entity_type: str = ""
     sub_type: str = ""           # e.g. Scheduled UCB, Small Finance Bank, MFI, HFC
     layer: str = ""              # NBFC scale layer: Base / Middle / Upper
@@ -76,3 +77,6 @@ class SearchResponse(BaseModel):
     city_lat: float
     city_lng: float
     search_id: str
+    # Per-source outcome of this search, e.g.
+    # {"rbi_registry": {"status": "ok", ...}, "bse": {"status": "degraded", ...}}
+    sources: dict = {}

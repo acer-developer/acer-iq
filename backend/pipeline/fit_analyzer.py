@@ -1,8 +1,8 @@
+from backend.netutil import SourceStatus
 from backend.pipeline.llm import chat, parse_json
 
 FIT_PROMPT = """\
-You are a strategic business analyst at ACER (Infomerics Valuation and Rating Pvt. Ltd.), \
-a SEBI-registered Indian credit rating agency.
+You are a strategic business analyst at ACER, a SEBI-registered Indian credit rating agency.
 
 Evaluate whether the following company is a strong target for ACER to pitch credit rating services.
 
@@ -184,7 +184,8 @@ def _data_driven_analysis(company: dict, credit_data: dict) -> dict:
     }
 
 
-async def analyze_fit(company: dict, credit_data: dict) -> dict:
+async def analyze_fit(company: dict, credit_data: dict,
+                      status: SourceStatus | None = None) -> dict:
     """
     Produce ACER fit analysis. Always generates a real data-driven result
     first, then enriches with AI if OpenRouter key is configured.
@@ -208,10 +209,10 @@ async def analyze_fit(company: dict, credit_data: dict) -> dict:
         rated_by_count=rated_by_count,
     )
 
-    raw    = await chat(prompt, max_tokens=600)
+    raw    = await chat(prompt, max_tokens=600, status=status)
     parsed = parse_json(raw) if raw else None
 
-    if parsed and isinstance(parsed.get("fit_score"), (int, float)):
+    if isinstance(parsed, dict) and isinstance(parsed.get("fit_score"), (int, float)):
         parsed["fit_label"] = _label(int(parsed["fit_score"]))
         return parsed
 

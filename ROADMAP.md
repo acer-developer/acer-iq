@@ -64,12 +64,18 @@ OpenRouter free LLM · deployed on Vercel (frontend) + Render/Railway (backend).
   CSV export links break.
 
 ### P6 — Known bugs & inconsistencies
-- [ ] `scorer.py` hardcodes `age = 2025 - year` (it's 2026; use current year).
-- [ ] BSE **listing date** is presented as **incorporation date** (`mca_scraper.py`).
-- [ ] `/api/company-credit` with a CIN passes the CIN into a *name*-search endpoint — almost always fails.
-- [ ] Branding chaos: "LeadRadar" (UI/README) vs "CredSight" (`llm.py` headers) vs "ACER-IQ" (repo) vs "Infomerics" (prompts). Pick one.
-- [ ] `config.py` still carries unused `anthropic_api_key` / `google_maps_api_key` split.
-- [ ] Hunter enrichment is useless in practice: OSM rarely has `website`, and without a domain Hunter returns nothing.
+- [x] `scorer.py` hardcodes `age = 2025 - year` → now uses `date.today().year`.
+- [x] BSE **listing date** is presented as **incorporation date** → split into a
+      separate `listing_date` field end-to-end (API, CSV, UI label "BSE listed").
+- [x] `/api/company-credit` with a CIN passes the CIN into a *name*-search endpoint →
+      CIN now resolves via the RBI registry (instant) or Zauba, then BSE is searched by name.
+- [x] Branding chaos → **ACER-IQ** everywhere (UI title, sidebar, README, LLM headers);
+      "Infomerics" remains only as the factual agency name in the 7-agency matrix.
+- [x] `config.py` unused `anthropic_api_key` / `google_maps_api_key` removed.
+- [x] Hunter enrichment skipped (with visible "skipped" status) when no domain/key —
+      the RBI-filed NBFC email is now the primary contact instead.
+- [x] **(found by tests)** `geo.state_from_cin` read chars 8-9 instead of 7-8 —
+      registry state coverage was 84%, now 99.8% after rebuild.
 
 ### P7 — No tests, no CI
 - Every BSE schema change is discovered in production by a confused salesperson.
@@ -168,13 +174,27 @@ Phases 3 and 4 are only worth building once the underlying company universe
 (Phase 1) and reliability (Phase 2) exist — otherwise we'd be adding features
 on top of incomplete, silently-failing data.
 
-## 6. Status (updated 2026-06-10)
+## 6. Status (updated 2026-06-10, end of day)
 
 **Decision: complete the existing two modules first (Find Leads + Company
 Research) — i.e. Phase 1 + Phase 2. Pipeline Radar is fully specced in
 [PIPELINE_RADAR_SPEC.md](PIPELINE_RADAR_SPEC.md) but ON HOLD until then.**
 
-- [ ] Phase 1 — Registry-backed discovery ← **IN PROGRESS**
-- [ ] Phase 2 — Engineering hardening ← **NEXT**
+- [x] Phase 1 — Registry-backed discovery — **DONE.** Committed
+      `registry.sqlite` (10,552 head offices: 9,075 NBFCs + 27 ARCs from the
+      RBI XLSX, 1,439 UCBs from the two RBI PDFs, 11 SFBs), ingest + query
+      layer, `/api/search` serves Banks/NBFCs from the registry instantly;
+      OSM/Places remains only as the Corporates fallback. RBI-filed NBFC
+      email is the first contact on every lead.
+- [x] Phase 2 — Engineering hardening — **DONE** (see [HANDOFF.md](HANDOFF.md)):
+      structured logging, per-source status in `/api/search` +
+      `/api/company-credit` responses, TTL cache + per-source semaphores for
+      all external calls (`backend/netutil.py`), batch LLM scoring (1 call
+      per search), all P6 bugs fixed, pytest suite (31 tests, fixtures) +
+      GitHub Actions CI, CORS origins configurable via `CORS_ORIGINS`.
+      *Deferred from the Phase 2 list:* auth, background search jobs with
+      progress streaming, persistent (Postgres-backed) cache — tracked below.
+- [ ] Phase 2 leftovers — simple auth, SSE/polling progress streaming,
+      cache persistence across restarts.
 - [ ] Phase 3 — Pipeline Radar module — **ON HOLD (spec ready)**
 - [ ] Phase 4 — Workflow — on hold

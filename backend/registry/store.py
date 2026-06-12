@@ -110,6 +110,17 @@ def search(location: str, entity_type: str = "All", limit: int = 60) -> list[dic
     return out
 
 
+def by_cin(cin: str) -> dict | None:
+    """Resolve a CIN to a registry company (name, address, type) — instant."""
+    if not available() or not cin:
+        return None
+    with _connect() as con:
+        row = con.execute(
+            "SELECT * FROM companies WHERE cin = ? COLLATE NOCASE", (cin.strip(),)
+        ).fetchone()
+    return dict(row) if row else None
+
+
 def stats() -> dict:
     if not available():
         return {"available": False}

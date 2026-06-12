@@ -1,8 +1,15 @@
+import logging
 import re
+
 import httpx
+
 from backend.config import settings
+from backend.netutil import SourceStatus, cache, limiter
+
+log = logging.getLogger("acer_iq.hunter")
 
 HUNTER_BASE = "https://api.hunter.io/v2"
+CACHE_TTL = 24 * 3600
 
 EXEC_KEYWORDS = {
     "cfo", "chief financial", "finance director", "managing director",
@@ -25,9 +32,12 @@ def _is_exec(position: str) -> bool:
     return any(k in pos for k in EXEC_KEYWORDS)
 
 
-async def enrich_contacts(companies: list[dict]) -> list[dict]:
+async def enrich_contacts(companies: list[dict],
+                          status: SourceStatus | None = None) -> list[dict]:
     api_key = settings.hunter_api_key
     if not api_key or api_key == "your_key_here":
+        if status:
+            status.skip("hunter", "no API key configured")
         for c in companies:
             c["contacts"] = []
         return companies
@@ -38,12 +48,32 @@ async def enrich_contacts(companies: list[dict]) -> list[dict]:
             if not domain:
                 company["contacts"] = []
                 continue
+
+            cache_key = "hunter:" + domain
+            hit = cache.get(cache_key)
+            if hit is not None:
+                company["contacts"] = hit
+                if status:
+                    status.ok("hunter")
+                continue
+
             try:
-                resp = await client.get(
-                    f"{HUNTER_BASE}/domain-search",
-                    params={"domain": domain, "api_key": api_key, "limit": 20},
-                )
-                data = resp.json().get("data", {})
+                async with limiter("hunter"):
+                    resp = await client.get(
+                        f"{HUNTER_BASE}/domain-search",
+                        params={"domain": domain, "api_key": api_key, "limit": 20},
+                    )
+                payload = resp.json()
+                if resp.status_code != 200:
+                    detail = str(payload.get("errors", resp.status_code))[:200]
+                    log.warning("Hunter HTTP %s for %s: %s", resp.status_code, domain, detail)
+                    if status:
+                        status.fail("hunter", detail)
+                    company["contacts"] = []
+                    continue
+                if status:
+                    status.ok("hunter")
+                data = payload.get("data", {})
                 emails = data.get("emails", [])
 
                 contacts = []
@@ -65,8 +95,12 @@ async def enrich_contacts(companies: list[dict]) -> list[dict]:
                 exec_contacts = [c for c in contacts if _is_exec(c["position"])]
                 other_contacts = [c for c in contacts if not _is_exec(c["position"])]
                 company["contacts"] = (exec_contacts + other_contacts)[:10]
+                cache.set_result(cache_key, company["contacts"], CACHE_TTL)
 
-            except Exception:
+            except Exception as exc:
+                log.warning("Hunter enrichment failed for %s: %r", domain, exc)
+                if status:
+                    status.fail("hunter", repr(exc))
                 company["contacts"] = []
 
     return companies
