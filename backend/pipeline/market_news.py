@@ -15,46 +15,52 @@ import httpx
 NSE_ANNOUNCEMENTS = "https://www.nseindia.com/api/corporate-announcements"
 NSE_WARMUP = "https://www.nseindia.com"
 
+_WARMUP_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                  "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+    "Accept-Encoding": "gzip, deflate",
+    "Accept-Language": "en-US,en;q=0.9",
+    "Connection": "keep-alive",
+}
+
 _HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-                  "(KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
+                  "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
     "Accept": "application/json, text/plain, */*",
+    "Accept-Encoding": "gzip, deflate",
     "Accept-Language": "en-US,en;q=0.9",
     "Referer": "https://www.nseindia.com/companies-listing/corporate-filings-announcements",
+    "Connection": "keep-alive",
 }
 
 _client: httpx.AsyncClient | None = None
 _warmed_at = 0.0
 
-_breaker = {"fails": 0, "until": 0.0}
 
-
-def _get_client() -> httpx.AsyncClient:
+def _get_client(force_new: bool = False) -> httpx.AsyncClient:
     global _client
+    if force_new and _client is not None and not _client.is_closed:
+        try:
+            import asyncio
+            asyncio.get_event_loop().create_task(_client.aclose())
+        except Exception:
+            pass
+        _client = None
     if _client is None or _client.is_closed:
         _client = httpx.AsyncClient(timeout=20, headers=_HEADERS, follow_redirects=True)
     return _client
 
 
-def _tripped() -> bool:
-    return time.time() < _breaker["until"]
-
-
-def _record(ok: bool) -> None:
-    if ok:
-        _breaker["fails"] = 0
-    else:
-        _breaker["fails"] += 1
-        if _breaker["fails"] >= 4:
-            _breaker["until"] = time.time() + 600
-            _breaker["fails"] = 0
-
-
 async def _warmup(client: httpx.AsyncClient) -> None:
     global _warmed_at
-    if time.time() - _warmed_at > 300:
-        await client.get(NSE_WARMUP, headers={**_HEADERS, "Accept": "text/html,*/*"})
-        _warmed_at = time.time()
+    if time.time() - _warmed_at > 120:
+        try:
+            r = await client.get(NSE_WARMUP, headers=_WARMUP_HEADERS)
+            if r.status_code in (200, 403) and client.cookies:
+                _warmed_at = time.time()
+        except Exception:
+            pass
 
 
 _SIGNAL_KEYWORDS = {
@@ -125,42 +131,48 @@ def _nse_date(d: date) -> str:
     return d.strftime("%d-%m-%Y")
 
 
+async def _try_fetch(client: httpx.AsyncClient, from_date: date, to_date: date):
+    await _warmup(client)
+    r = await client.get(NSE_ANNOUNCEMENTS, params={
+        "index": "equities",
+        "from_date": _nse_date(from_date),
+        "to_date": _nse_date(to_date),
+    })
+    if r.status_code != 200 or "json" not in r.headers.get("content-type", ""):
+        return None, f"NSE returned HTTP {r.status_code}."
+    data = r.json()
+    items = data if isinstance(data, list) else data.get("data", [])
+    return items, None
+
+
 async def fetch_market_news(days: int = 7) -> dict:
-    if _tripped():
-        return {
-            "items": [], "status": "blocked", "source": "NSE",
-            "message": "NSE is temporarily unreachable. Try again in a few minutes.",
-        }
-
-    client = _get_client()
-    try:
-        await _warmup(client)
-    except Exception:
-        pass
-
     to_date = date.today()
     from_date = to_date - timedelta(days=days)
 
+    # Attempt 1: existing client
+    client = _get_client()
+    items = None
+    err_msg = ""
     try:
-        r = await client.get(NSE_ANNOUNCEMENTS, params={
-            "index": "equities",
-            "from_date": _nse_date(from_date),
-            "to_date": _nse_date(to_date),
-        })
-        if r.status_code != 200 or "json" not in r.headers.get("content-type", ""):
-            _record(False)
-            return {
-                "items": [], "status": "blocked", "source": "NSE",
-                "message": f"NSE returned HTTP {r.status_code}. The exchange may be blocking requests.",
-            }
-        _record(True)
-        data = r.json()
-        items = data if isinstance(data, list) else data.get("data", [])
+        items, err_msg = await _try_fetch(client, from_date, to_date)
     except Exception:
-        _record(False)
+        items = None
+
+    # Attempt 2: fresh client (new cookies)
+    if items is None:
+        global _warmed_at
+        _warmed_at = 0.0
+        client = _get_client(force_new=True)
+        try:
+            items, err_msg = await _try_fetch(client, from_date, to_date)
+        except Exception as e:
+            items = None
+            err_msg = str(e) or "Connection failed"
+
+    if items is None:
         return {
             "items": [], "status": "blocked", "source": "NSE",
-            "message": "Could not connect to NSE. Check your internet connection.",
+            "message": f"Could not reach NSE after 2 attempts. {err_msg}",
         }
 
     all_items = []
