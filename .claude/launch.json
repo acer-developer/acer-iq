@@ -2,11 +2,18 @@
   "version": "0.0.1",
   "configurations": [
     {
-      "name": "lead-gen-frontend",
+      "name": "frontend",
       "runtimeExecutable": "npm",
       "runtimeArgs": ["run", "dev"],
-      "cwd": "C:\\Users\\Dell\\Desktop\\Claude\\projects\\acer-iq\\frontend",
+      "cwd": "C:\\Users\\Dell\\Desktop\\Claude\\projects\\production\\acer-iq\\frontend",
       "port": 5173
+    },
+    {
+      "name": "backend",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["-m", "uvicorn", "backend.main:app", "--reload", "--port", "8000"],
+      "cwd": "C:\\Users\\Dell\\Desktop\\Claude\\projects\\production\\acer-iq",
+      "port": 8000
     }
   ]
 }

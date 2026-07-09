@@ -24,10 +24,11 @@ from backend.pipeline.bse_scraper import bse_health_check, fetch_past_instrument
 from backend.pipeline.office_locator import find_office_locations
 from backend.pipeline.credit_history import fetch_credit_history
 from backend.pipeline.fit_analyzer import analyze_fit
+from backend.pipeline.market_news import fetch_market_news
 from backend import database
 from backend.registry import store as registry_store
 
-app = FastAPI(title="Lead Gen Tool", version="2.0.0")
+app = FastAPI(title="ACER-IQ", version="3.0.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -197,6 +198,15 @@ async def search_leads(req: SearchRequest):
         city_lng=city_lng,
         search_id=search_id,
     )
+
+
+# ── Market News ──────────────────────────────────────────────────────────────
+
+@app.get("/api/news")
+async def get_market_news(days: int = 7):
+    if days < 1 or days > 30:
+        raise HTTPException(status_code=400, detail="days must be between 1 and 30")
+    return await fetch_market_news(days)
 
 
 # ── Company Autocomplete ─────────────────────────────────────────────────────
