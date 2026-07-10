@@ -222,7 +222,6 @@ export default function App() {
           </div>
           <div>
             <span className="text-sm font-bold text-gray-900">ACER-IQ</span>
-            <span className="ml-2 text-xs text-gray-400">Credit Rating Intelligence / India</span>
           </div>
           <div className="ml-auto flex items-center gap-2">
             <InfoButton tabId={activeTab} />
