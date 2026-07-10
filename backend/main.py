@@ -26,6 +26,7 @@ from backend.pipeline.credit_history import fetch_credit_history
 from backend.pipeline.fit_analyzer import analyze_fit
 from backend.pipeline.market_news import fetch_market_news
 from backend.pipeline.rss_news import fetch_rss_news
+from backend.pipeline.sector_indices import fetch_sector_indices
 from backend import database
 from backend.registry import store as registry_store
 
@@ -199,6 +200,13 @@ async def search_leads(req: SearchRequest):
         city_lng=city_lng,
         search_id=search_id,
     )
+
+
+# ── Sector Indices (Signal Radar) ────────────────────────────────────────────
+
+@app.get("/api/sectors")
+async def get_sectors():
+    return await fetch_sector_indices()
 
 
 # ── Market News ──────────────────────────────────────────────────────────────
