@@ -5,6 +5,7 @@ import Sidebar from "./components/Sidebar.jsx";
 import CompanyCard from "./components/CompanyCard.jsx";
 import CompanyResearchPage from "./components/company/CompanyResearchPage.jsx";
 import MarketNewsPage from "./components/MarketNewsPage.jsx";
+import SignalRadarPage from "./components/SignalRadarPage.jsx";
 import ComingSoon from "./components/ComingSoon.jsx";
 import { apiUrl } from "./lib/api.js";
 
@@ -232,18 +233,9 @@ export default function App() {
       {/* Tabs */}
       <TabBar active={activeTab} onChange={(t) => { setActiveTab(t); setError(""); }} />
 
-      {/* Signal Radar (coming soon) */}
+      {/* Signal Radar (live) */}
       {activeTab === "radar" && (
-        <ComingSoon
-          title="Signal Radar"
-          description="Monitors NCD/bond board approvals, rating withdrawals, surveillance renewals, and bank loan rating expirations from BSE/NSE filings and CRA press releases. Companies with active signals need a rating within weeks."
-          icon={
-            <svg className="h-8 w-8 text-blue-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-              <path strokeLinecap="round" strokeLinejoin="round"
-                d="M9.348 14.651a3.75 3.75 0 010-5.303m5.304 0a3.75 3.75 0 010 5.303m-7.425 2.122a6.75 6.75 0 010-9.546m9.546 0a6.75 6.75 0 010 9.546M5.106 18.894c-3.808-3.808-3.808-9.98 0-13.789m13.788 0c3.808 3.808 3.808 9.981 0 13.79M12 12h.008v.007H12V12zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0z" />
-            </svg>
-          }
-        />
+        <SignalRadarPage />
       )}
 
       {/* Market News (live) */}
