@@ -25,6 +25,7 @@ from backend.pipeline.office_locator import find_office_locations
 from backend.pipeline.credit_history import fetch_credit_history
 from backend.pipeline.fit_analyzer import analyze_fit
 from backend.pipeline.market_news import fetch_market_news
+from backend.pipeline.rss_news import fetch_rss_news
 from backend import database
 from backend.registry import store as registry_store
 
@@ -203,10 +204,51 @@ async def search_leads(req: SearchRequest):
 # ── Market News ──────────────────────────────────────────────────────────────
 
 @app.get("/api/news")
-async def get_market_news(days: int = 7):
+async def get_market_news(days: int = 7, source: str = "all"):
     if days < 1 or days > 30:
         raise HTTPException(status_code=400, detail="days must be between 1 and 30")
-    return await fetch_market_news(days)
+
+    if source == "nse":
+        return await fetch_market_news(days)
+    if source == "rss":
+        return await fetch_rss_news()
+
+    import asyncio
+    nse_task = asyncio.create_task(fetch_market_news(days))
+    rss_task = asyncio.create_task(fetch_rss_news())
+    nse_data, rss_data = await asyncio.gather(nse_task, rss_task)
+
+    nse_items = nse_data.get("items", [])
+    for it in nse_items:
+        it.setdefault("source", "NSE")
+        it.setdefault("link", "")
+        it.setdefault("description", "")
+
+    rss_all = rss_data.get("all_items", [])
+
+    combined = nse_items + rss_all
+    combined.sort(key=lambda x: x.get("date", ""), reverse=True)
+
+    sources_summary = ["NSE"]
+    if nse_data.get("status") == "blocked":
+        sources_summary[0] = "NSE (unreachable)"
+    sources_summary.extend(rss_data.get("sources_ok", []))
+    sources_summary.extend(
+        f"{s} (failed)" for s in rss_data.get("sources_fail", [])
+    )
+
+    return {
+        "items": combined[:300],
+        "status": "ok" if combined else "empty",
+        "sources": sources_summary,
+        "nse_raw": nse_data.get("total_raw", 0),
+        "nse_signals": nse_data.get("total_filtered", 0),
+        "rss_total": rss_data.get("total_items", 0),
+        "rss_signals": rss_data.get("total_signals", 0),
+        "from_date": nse_data.get("from_date", ""),
+        "to_date": nse_data.get("to_date", ""),
+        "total_items": len(combined),
+    }
 
 
 # ── Company Autocomplete ─────────────────────────────────────────────────────
