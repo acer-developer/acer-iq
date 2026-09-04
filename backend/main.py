@@ -2,7 +2,10 @@ import asyncio
 import csv
 import io
 import json
+import logging
 import uuid
+from collections import Counter
+from contextvars import ContextVar
 from pathlib import Path
 
 import httpx
@@ -28,26 +31,90 @@ from backend.pipeline.market_news import fetch_market_news
 from backend.pipeline.rss_news import fetch_rss_news
 from backend.pipeline.sector_indices import fetch_sector_indices
 from backend import database
+from backend.config import settings
 from backend.registry import store as registry_store
 
-app = FastAPI(title="ACER-IQ", version="3.0.0")
+logging.basicConfig(
+    level=getattr(logging, settings.log_level.upper(), logging.INFO),
+    format="%(asctime)s %(levelname)-7s %(name)s %(message)s",
+)
+log = logging.getLogger("acer-iq")
 
+app = FastAPI(title="ACER-IQ", version="3.1.0")
+
+# Vercel frontend (incl. preview deploys) + local dev. Override with
+# ALLOWED_ORIGINS=https://a.example,https://b.example to pin exact hosts.
+_origins = [o.strip() for o in settings.allowed_origins.split(",") if o.strip()]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
+    allow_origins=_origins,
+    allow_origin_regex=(
+        None if _origins
+        else r"https://[\w.-]+\.vercel\.app|http://localhost:\d+|http://127\.0\.0\.1:\d+"
+    ),
+    allow_methods=["GET", "POST"],
     allow_headers=["*"],
 )
 
 _search_cache: dict[str, list[dict]] = {}
 
+# Per-request tally of which enrichment sources failed, so the API can tell the
+# UI "BSE returned nothing because it errored" instead of showing a silent blank.
+# A Counter object shared through the context survives asyncio.gather (each Task
+# copies the context, but the Counter it points at is the same object).
+_failures: ContextVar[Counter | None] = ContextVar("failures", default=None)
 
-async def _safe(coro, default):
-    """Run a coroutine and return default on any exception."""
+
+async def _safe(coro, default, label: str = ""):
+    """Run a coroutine, returning default on failure. Never silent: every
+    failure is logged and tallied against `label` for the response."""
     try:
         return await coro
-    except Exception:
+    except Exception as e:
+        log.warning("%s failed: %s: %s", label or "step", type(e).__name__, e)
+        tally = _failures.get()
+        if tally is not None:
+            tally[label or "unknown"] += 1
         return default
+
+
+# Internal _safe() labels -> what the sales team should actually read.
+_SOURCE_NAMES = {
+    "bse_instruments": "BSE",
+    "bse_suggest":     "BSE",
+    "mca":             "MCA/Zauba",
+    "credit_history":  "Rating history",
+    "fit_analysis":    "AI fit analysis",
+    "scoring":         "Lead scoring",
+    "google_places":   "Google Places",
+}
+
+
+def _llm_configured() -> bool:
+    from backend.pipeline.llm import _providers
+    return bool(_providers())
+
+
+def _source_status(total: int) -> list[dict]:
+    """What each data source did on this request — surfaced in the response so
+    the UI can badge a degraded source instead of implying an empty truth."""
+    from backend.pipeline.bse_scraper import _bse_tripped
+
+    # display name -> failure detail; "" means healthy. Keying by display name
+    # merges the several internal labels that mean "BSE" into one badge.
+    status: dict[str, str] = {
+        "RBI/NSE registry": "" if registry_store.available()
+                            else "registry.sqlite missing — run the ingest CLI",
+        "BSE": "circuit breaker open — BSE unreachable or blocking" if _bse_tripped() else "",
+        "AI scoring": "" if _llm_configured()
+                      else "no LLM key configured — rule-based scores only",
+    }
+    for label, n in (_failures.get() or Counter()).items():
+        name = _SOURCE_NAMES.get(label, label)
+        if not status.get(name):
+            status[name] = (f"{n} of {total} lookups failed" if total > 1
+                            else "lookup failed")
+    return [{"name": n, "ok": not d, "detail": d} for n, d in status.items()]
 
 
 @app.post("/api/search", response_model=SearchResponse)
@@ -55,6 +122,7 @@ async def search_leads(req: SearchRequest):
     if not req.city.strip():
         raise HTTPException(status_code=400, detail="City or pincode is required")
 
+    _failures.set(Counter())
     entity_type = req.entity_type or "All"
     instrument_type = req.instrument_type or "All"
     industry = req.industry or f"{entity_type} — {instrument_type}"
@@ -62,11 +130,13 @@ async def search_leads(req: SearchRequest):
     raw_companies, city_lat, city_lng = await discover_companies(
         req.city, industry, entity_type, instrument_type, size=req.size or "All"
     )
+    log.info("search city=%r entity=%s instrument=%s -> %d candidates",
+             req.city, entity_type, instrument_type, len(raw_companies))
     if not raw_companies:
         # Return empty result with city coordinates so map still zooms
         return SearchResponse(
             companies=[], city_lat=city_lat, city_lng=city_lng,
-            search_id=str(uuid.uuid4()),
+            search_id=str(uuid.uuid4()), sources=_source_status(0),
         )
 
     # Enrich contacts — safe, returns companies with empty contacts on failure
@@ -96,7 +166,7 @@ async def search_leads(req: SearchRequest):
                 c["incorporation_date"] = year if year.isdigit() else ""
                 c.setdefault("directors", [])
             elif not is_coop:
-                mca = await _safe(fetch_mca_data(c["name"], skip_zauba=True), {})
+                mca = await _safe(fetch_mca_data(c["name"], skip_zauba=True), {}, "mca")
                 c["cin"] = mca.get("cin", "")
                 c["incorporation_date"] = mca.get("incorporation_date", "")
                 c["directors"] = mca.get("directors", [])
@@ -123,14 +193,15 @@ async def search_leads(req: SearchRequest):
             if sub == "Co-operative Bank":
                 c["past_instruments"] = []
             else:
-                c["past_instruments"] = await _safe(fetch_past_instruments(c["name"]), [])
+                c["past_instruments"] = await _safe(
+                    fetch_past_instruments(c["name"]), [], "bse_instruments")
 
             # Scoring: rule-based only in bulk search (fast, deterministic).
             # The LLM still powers fit analysis in Company Research.
             c = await _safe(
                 score_company(c, industry, req.city, c.get("entity_type", entity_type),
                               instrument_type, use_llm=False),
-                c,
+                c, "scoring",
             )
             c.setdefault("score", 0)
             c.setdefault("score_label", "Pending")
@@ -189,16 +260,19 @@ async def search_leads(req: SearchRequest):
 
     search_id = str(uuid.uuid4())
     _search_cache[search_id] = [c.model_dump() for c in companies]
-    try:
-        database.save_search(search_id, req.city, industry, companies)
-    except Exception:
-        pass
+    database.save_search(search_id, req.city, industry, companies)
+
+    sources = _source_status(len(companies))
+    degraded = [s["name"] for s in sources if not s["ok"]]
+    if degraded:
+        log.warning("search %s degraded sources: %s", search_id[:8], ", ".join(degraded))
 
     return SearchResponse(
         companies=companies,
         city_lat=city_lat,
         city_lng=city_lng,
         search_id=search_id,
+        sources=sources,
     )
 
 
@@ -271,31 +345,17 @@ async def company_suggest(q: str = ""):
     suggestions = registry_store.suggest(q.strip(), limit=8)
     seen = {s["name"].lower() for s in suggestions}
 
-    # Supplement with BSE-listed companies (covers corporates outside RBI lists)
-    from backend.pipeline.bse_scraper import _bse_tripped, get_bse_client
-    if not _bse_tripped():
-        try:
-            resp = await get_bse_client().get(
-                "https://api.bseindia.com/BseIndiaAPI/api/SearchData/w",
-                params={
-                    "strText": q.strip(), "flag": "0",
-                    "Membertype": "S", "pageno": "1", "tab": "ALL",
-                },
-            )
-            if resp.status_code == 200:
-                for item in (resp.json().get("Table") or [])[:10]:
-                    name = (item.get("Scrip_Name") or item.get("SCRIP_NAME") or "").strip()
-                    code = str(item.get("SCRIP_CD") or item.get("scripCd") or "")
-                    sector = (item.get("SECTOR") or item.get("Sector") or "").strip()
-                    if name and name.lower() not in seen:
-                        suggestions.append({
-                            "name": name, "cin": "", "bse_code": code,
-                            "sector": sector or "BSE-listed",
-                            "source": "bse",
-                        })
-                        seen.add(name.lower())
-        except Exception:
-            pass
+    # Supplement with BSE-listed companies (covers corporates outside RBI lists).
+    # Served from the cached BSE scrip master — no per-keystroke network call.
+    from backend.pipeline.bse_scraper import search_bse_companies
+    for item in await _safe(search_bse_companies(q.strip(), limit=10), [], "bse_suggest"):
+        if item["name"].lower() in seen:
+            continue
+        suggestions.append({
+            "name": item["name"], "cin": "", "bse_code": item["bse_code"],
+            "sector": item["sector"] or "BSE-listed", "source": "bse",
+        })
+        seen.add(item["name"].lower())
 
     return {"suggestions": suggestions[:15]}
 
@@ -311,6 +371,7 @@ async def company_credit(req: CompanyCreditRequest):
     if not req.query.strip():
         raise HTTPException(status_code=400, detail="Company name or CIN is required")
 
+    _failures.set(Counter())
     query = req.query.strip()
 
     # Detect CIN pattern (starts with L or U followed by digits and letters)
@@ -318,6 +379,17 @@ async def company_credit(req: CompanyCreditRequest):
 
     # 1) RBI registry — authoritative for NBFCs / co-op banks / SFBs / ARCs
     reg = registry_store.get_by_name(query)
+
+    # Every downstream lookup (BSE, Zauba, NSE) is a *name* search. Feeding it a
+    # CIN returns nothing, which the UI would render as "not rated by anyone" —
+    # a false negative on the one screen the sales team trusts. Fail loudly.
+    if is_cin and not reg:
+        raise HTTPException(
+            status_code=404,
+            detail=f"CIN {query} is not in the registry. Search by company name "
+                   f"instead — CIN-to-name resolution needs MCA data, which we "
+                   f"do not have a free source for yet.",
+        )
 
     company_info: dict = {
         "name": (reg or {}).get("name") or query,
@@ -338,7 +410,7 @@ async def company_credit(req: CompanyCreditRequest):
             company_info["incorporation_date"] = year
 
     # 2) BSE/Zauba — listing data, directors, registered address
-    mca = await _safe(fetch_mca_data(company_info["name"]), {})
+    mca = await _safe(fetch_mca_data(company_info["name"]), {}, "mca")
     if mca.get("cin") and not company_info["cin"]:
         company_info["cin"] = mca["cin"]
     if mca.get("registered_address") and not company_info["address"]:
@@ -358,7 +430,7 @@ async def company_credit(req: CompanyCreditRequest):
         "total_instruments": 0,
         "rated_by_count": 0,
         "raw_instruments": [],
-    })
+    }, "credit_history")
 
     # AI fit analysis
     fit = await _safe(analyze_fit(company_info, credit_data), {
@@ -367,16 +439,17 @@ async def company_credit(req: CompanyCreditRequest):
         "opportunity_type": "Analysis unavailable",
         "key_insights": [],
         "watch_outs": [],
-        "recommended_action": "Run with Anthropic API key for AI analysis",
+        "recommended_action": "Set OPENROUTER_API_KEY for AI fit analysis",
         "best_instrument_pitch": "NCD",
         "urgency": "Medium",
         "already_rated_by_infomerics": False,
-    })
+    }, "fit_analysis")
 
     return {
         "company": company_info,
         "credit_data": credit_data,
         "fit_analysis": fit,
+        "sources": _source_status(1),
     }
 
 
@@ -395,7 +468,7 @@ def _guess_entity_type(name: str) -> str:
 async def get_directors(company_name: str):
     """Board of directors for a selected lead — BSE CorpInfo for listed
     companies, Zauba for private ones. Cached + circuit-breaker protected."""
-    mca = await _safe(fetch_mca_data(company_name), {})
+    mca = await _safe(fetch_mca_data(company_name), {}, "mca")
     return {
         "directors": mca.get("directors", []),
         "cin": mca.get("cin", ""),
@@ -407,13 +480,13 @@ async def get_directors(company_name: str):
 
 @app.get("/api/offices/{company_name}")
 async def get_offices(company_name: str, lat: float = 20.5937, lng: float = 78.9629):
-    offices = await _safe(find_office_locations(company_name, lat, lng), [])
+    offices = await _safe(find_office_locations(company_name, lat, lng), [], "google_places")
     return {"offices": offices}
 
 
 @app.get("/api/instruments/{company_name}")
 async def get_instruments(company_name: str):
-    instruments = await _safe(fetch_past_instruments(company_name), [])
+    instruments = await _safe(fetch_past_instruments(company_name), [], "bse_instruments")
     return {"instruments": instruments}
 
 
@@ -427,8 +500,9 @@ async def export_csv(search_id: str):
             db_row = database.load_search(search_id)
             if db_row:
                 cached = json.loads(db_row["results"])
-        except Exception:
-            pass
+        except Exception as e:
+            log.error("export fallback for %s failed: %s: %s",
+                      search_id, type(e).__name__, e)
     if not cached:
         raise HTTPException(status_code=404, detail="Search not found")
 

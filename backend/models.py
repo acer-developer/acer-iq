@@ -72,8 +72,15 @@ class SearchRequest(BaseModel):
     size: str = "All"   # All | large (≥₹1,000cr / scheduled) | small
 
 
+class SourceStatus(BaseModel):
+    name: str
+    ok: bool
+    detail: str = ""
+
+
 class SearchResponse(BaseModel):
     companies: List[Company]
     city_lat: float
     city_lng: float
     search_id: str
+    sources: List[SourceStatus] = []

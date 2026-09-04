@@ -1,0 +1,342 @@
+{
+  "schema_version": 2,
+  "diagram_type": "workflow",
+  "meta": {
+    "title": "ACER-IQ: Path to a Complete Product",
+    "locale": "en",
+    "output": "ROADMAP_FLOW.html",
+    "quality_profile": "showcase",
+    "views": [
+      {
+        "id": "free-path",
+        "label": "The all-free path",
+        "focus": [
+          "registry_now",
+          "mca_bulk",
+          "cache_auth",
+          "radar",
+          "pipeline_crm",
+          "complete"
+        ],
+        "note": "Every step from today's registry to a finished product using only free public sources."
+      },
+      {
+        "id": "paid-points",
+        "label": "Where money is needed",
+        "focus": [
+          "mca_live",
+          "hosting",
+          "contacts",
+          "mca_bulk",
+          "cache_auth",
+          "pipeline_crm"
+        ],
+        "note": "Three paid dependencies. Only always-on hosting is unavoidable."
+      },
+      {
+        "id": "shipped",
+        "label": "Shipped this session",
+        "focus": [
+          "shipped",
+          "cache_auth",
+          "research"
+        ],
+        "note": "BSE data path restored and every source failure made visible instead of silent."
+      }
+    ],
+    "legend": {
+      "mode": "hidden"
+    }
+  },
+  "lanes": [
+    {
+      "id": "data",
+      "label": "Data foundation"
+    },
+    {
+      "id": "paid",
+      "label": "Paid dependencies",
+      "variant": "exception"
+    },
+    {
+      "id": "platform",
+      "label": "Reliability + access"
+    },
+    {
+      "id": "product",
+      "label": "Product modules"
+    }
+  ],
+  "phases": [
+    {
+      "id": "today",
+      "label": "Today",
+      "fromCol": 0,
+      "toCol": 0
+    },
+    {
+      "id": "foundation",
+      "label": "Complete the universe",
+      "fromCol": 1,
+      "toCol": 2,
+      "variant": "emphasis"
+    },
+    {
+      "id": "differentiate",
+      "label": "Intelligence + workflow",
+      "fromCol": 3,
+      "toCol": 5,
+      "variant": "dashed"
+    }
+  ],
+  "mainPath": [
+    "registry_now",
+    "mca_bulk",
+    "cache_auth",
+    "radar",
+    "pipeline_crm",
+    "complete"
+  ],
+  "semanticChecks": {
+    "allowedRoots": [
+      "registry_now",
+      "shipped",
+      "mca_live",
+      "hosting",
+      "contacts",
+      "cra_scrapers"
+    ],
+    "allowedTerminals": [
+      "complete"
+    ]
+  },
+  "nodes": [
+    {
+      "id": "registry_now",
+      "lane": "data",
+      "col": 0,
+      "type": "database",
+      "label": "Registry",
+      "sublabel": "FREE · 12.8k RBI + NSE",
+      "tag": "live",
+      "width": 132
+    },
+    {
+      "id": "mca_bulk",
+      "lane": "data",
+      "col": 1,
+      "type": "database",
+      "label": "MCA Master",
+      "sublabel": "FREE · data.gov.in CSV",
+      "tag": "gap",
+      "width": 132
+    },
+    {
+      "id": "cra_scrapers",
+      "lane": "data",
+      "col": 3,
+      "type": "external",
+      "label": "CRA Filings",
+      "sublabel": "FREE · CRA press releases",
+      "tag": "gap",
+      "width": 132
+    },
+    {
+      "id": "mca_live",
+      "lane": "paid",
+      "col": 1,
+      "type": "external",
+      "label": "Live CIN API",
+      "sublabel": "PAID · Probe42 / Tofler",
+      "tag": "skippable",
+      "width": 132
+    },
+    {
+      "id": "hosting",
+      "lane": "paid",
+      "col": 2,
+      "type": "cloud",
+      "label": "Paid Hosting",
+      "sublabel": "PAID · ~$7/mo",
+      "tag": "required",
+      "width": 132
+    },
+    {
+      "id": "contacts",
+      "lane": "paid",
+      "col": 4,
+      "type": "external",
+      "label": "CFO Contacts",
+      "sublabel": "PAID · no free source",
+      "tag": "partial",
+      "width": 132
+    },
+    {
+      "id": "shipped",
+      "lane": "platform",
+      "col": 0,
+      "type": "backend",
+      "label": "Data Path Fixed",
+      "sublabel": "FREE · BSE + health badges",
+      "tag": "done",
+      "width": 132
+    },
+    {
+      "id": "cache_auth",
+      "lane": "platform",
+      "col": 2,
+      "type": "security",
+      "label": "Cache + Auth",
+      "sublabel": "FREE · Supabase persist",
+      "tag": "gap",
+      "width": 132
+    },
+    {
+      "id": "research",
+      "lane": "product",
+      "col": 2,
+      "type": "frontend",
+      "label": "Research Tab",
+      "sublabel": "ACER as 8th CRA",
+      "tag": "live",
+      "width": 132
+    },
+    {
+      "id": "radar",
+      "lane": "product",
+      "col": 3,
+      "type": "backend",
+      "label": "Pipeline Radar",
+      "sublabel": "who needs rating now",
+      "tag": "flagship",
+      "width": 132
+    },
+    {
+      "id": "pipeline_crm",
+      "lane": "product",
+      "col": 4,
+      "type": "frontend",
+      "label": "My Pipeline",
+      "sublabel": "lead lifecycle + owner",
+      "tag": "planned",
+      "width": 132
+    },
+    {
+      "id": "complete",
+      "lane": "product",
+      "col": 5,
+      "type": "cloud",
+      "label": "Complete",
+      "sublabel": "signal to mandate",
+      "tag": "goal",
+      "width": 132
+    }
+  ],
+  "edges": [
+    {
+      "from": "registry_now",
+      "to": "mca_bulk",
+      "label": "+ Corporates",
+      "variant": "emphasis",
+      "role": "main"
+    },
+    {
+      "from": "mca_bulk",
+      "to": "cache_auth",
+      "label": "geocode at ingest",
+      "variant": "emphasis",
+      "role": "main"
+    },
+    {
+      "from": "shipped",
+      "to": "cache_auth",
+      "label": "failures visible",
+      "role": "branch"
+    },
+    {
+      "from": "cache_auth",
+      "to": "research",
+      "label": "trusted reads",
+      "role": "branch"
+    },
+    {
+      "from": "research",
+      "to": "radar",
+      "label": "rating gaps",
+      "role": "branch"
+    },
+    {
+      "from": "cache_auth",
+      "to": "radar",
+      "variant": "emphasis",
+      "role": "main"
+    },
+    {
+      "from": "cra_scrapers",
+      "to": "radar",
+      "label": "why-now proof",
+      "role": "branch"
+    },
+    {
+      "from": "radar",
+      "to": "pipeline_crm",
+      "label": "qualified lead",
+      "variant": "emphasis",
+      "role": "main"
+    },
+    {
+      "from": "pipeline_crm",
+      "to": "complete",
+      "label": "mandate won",
+      "variant": "emphasis",
+      "role": "main"
+    },
+    {
+      "from": "hosting",
+      "to": "cache_auth",
+      "label": "survives restarts",
+      "variant": "security",
+      "role": "branch"
+    },
+    {
+      "from": "mca_live",
+      "to": "mca_bulk",
+      "label": "real-time only",
+      "variant": "dashed",
+      "role": "branch"
+    },
+    {
+      "from": "contacts",
+      "to": "pipeline_crm",
+      "label": "bottleneck",
+      "variant": "security",
+      "role": "error"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "emerald",
+      "title": "Free Carries the Product",
+      "items": [
+        "RBI, NSE, MCA registries are free downloads",
+        "OpenRouter free tier covers AI scoring"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "Where Money Is Needed",
+      "items": [
+        "Free host sleeps and drops cached searches",
+        "No free source for Indian CFO contacts"
+      ]
+    },
+    {
+      "dot": "cyan",
+      "title": "Shipped This Session",
+      "items": [
+        "BSE debt lookups restored after endpoints died",
+        "Source failures logged and badged, not empty"
+      ]
+    }
+  ]
+}

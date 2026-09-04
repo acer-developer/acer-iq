@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from "react";
 import { apiUrl } from "../../lib/api.js";
+import SourceHealth from "../SourceHealth.jsx";
 
 // ── Autocomplete search box ───────────────────────────────────────────────────
 function CompanySearchInput({ onSearch, loading }) {
@@ -512,6 +513,8 @@ export default function CompanyResearchPage() {
           {result && (
             <>
               <CompanyInfo company={company} />
+
+              <SourceHealth sources={result?.sources} className="mb-4" />
 
               {unverified && (
                 <div className="mb-4 flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">

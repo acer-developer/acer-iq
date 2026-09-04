@@ -34,3 +34,4 @@ enrichment_checkpoint.json
 __pycache__
 *.xlsx
 *.csv
+.venv/

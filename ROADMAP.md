@@ -168,13 +168,129 @@ Phases 3 and 4 are only worth building once the underlying company universe
 (Phase 1) and reliability (Phase 2) exist — otherwise we'd be adding features
 on top of incomplete, silently-failing data.
 
-## 6. Status (updated 2026-06-10)
+## 6. Status (updated 2026-09-04)
+
+Actionable task list: **[TODO.md](TODO.md)**
+Visual roadmap: **[ROADMAP_FLOW.html](ROADMAP_FLOW.html)** (source: `roadmap-flow.workflow.json`)
 
 **Decision: complete the existing two modules first (Find Leads + Company
 Research) — i.e. Phase 1 + Phase 2. Pipeline Radar is fully specced in
 [PIPELINE_RADAR_SPEC.md](PIPELINE_RADAR_SPEC.md) but ON HOLD until then.**
 
-- [ ] Phase 1 — Registry-backed discovery ← **IN PROGRESS**
-- [ ] Phase 2 — Engineering hardening ← **NEXT**
+- [ ] Phase 1 — Registry-backed discovery ← **IN PROGRESS** (RBI/NSE done; MCA Corporate segment outstanding)
+- [ ] Phase 2 — Engineering hardening ← **IN PROGRESS**
 - [ ] Phase 3 — Pipeline Radar module — **ON HOLD (spec ready)**
 - [ ] Phase 4 — Workflow — on hold
+
+### Done 2026-09-04
+
+**P0 — BSE data path was silently dead, now restored.** BSE retired both debt
+*search* endpoints (`GetDebtScripsSearchData/w` and `SearchData/w` now 302 to
+`error_Bse.html`). Every BSE-derived field — past instruments, CIN, directors,
+registered address, company autocomplete — was coming back empty and the UI
+presented that as fact. Replaced with the still-live active-scrip master
+(`ListofScripData/w`), fetched once per 12h and indexed by normalized issuer
+name: 676 debt issuers / 6,272 debt scrips / 6,364 listed names. A 60-lead
+search now makes **one** BSE call instead of sixty, and 27/60 Mumbai NBFC leads
+come back with real instruments where previously zero did.
+
+- [x] P2 — Structured logging across backend; `_safe()` logs and tallies every
+      failure instead of swallowing it. `database.py` no longer hides
+      persistence errors.
+- [x] P2 — Per-source health surfaced in `/api/search` and `/api/company-credit`
+      responses (`sources[]`) and badged in the UI
+      (`frontend/src/components/SourceHealth.jsx`). An empty result can no
+      longer masquerade as "this company has no rated debt".
+- [x] P6 — Incorporation date now read from the CIN (chars 8:12), not BSE's
+      listing date. (Tata Capital: incorporated 1991, listed 2025 — the old
+      code reported 2025.)
+- [x] P6 — `/api/company-credit` with an unresolvable CIN returns 404 with a
+      reason instead of a name-searching a CIN and reporting "rated by nobody".
+- [x] P6 — Branding: `CredSight` → `ACER-IQ` in LLM headers. Dead
+      `anthropic_api_key` / `google_maps_api_key` config keys removed
+      (`extra = "ignore"` added so leftover Render env vars can't break boot).
+- [x] P6 — Stale "Run with Anthropic API key" copy → OpenRouter.
+- [x] P5 — CORS is env-driven (`ALLOWED_ORIGINS`), defaulting to a
+      `*.vercel.app` + localhost regex instead of `*`.
+- [x] P7 — Tests + CI: `backend/test_hardening.py` (12 checks, `python -m
+      backend.test_hardening`, no network) covering failure visibility, issuer
+      matching, and BSE scrip-id coupon/maturity parsing. Wired to GitHub
+      Actions in `.github/workflows/ci.yml` (backend tests + app-import smoke +
+      frontend build).
+- [x] P4 — **LLM fallback chain**: `llm.py` tries OpenRouter, then TokenRouter
+      (`z-ai/glm-5.3-free`), so a missing key or a rate-limited free tier
+      degrades to the next provider instead of silently dropping to rule-based
+      scores. Two things a naive drop-in misses: glm-5.3 is a **reasoning
+      model** whose private reasoning tokens are billed against `max_tokens`
+      (~300 for a small JSON answer), so the callers' 512-600 budget is raised
+      to 2,000 or the JSON truncates mid-object; and a reply cut off at
+      `max_tokens` is **rejected and retried on the next provider**, because
+      half-parsed JSON is worse than none. Keys are per-environment; the
+      fallback key lives in `.env` only, never in the repo.
+- [x] P4 — Hunter's free tier is 25 lookups/**month**, so contact enrichment is
+      capped at 5 per search (`MAX_HUNTER_LOOKUPS`) and logs when it stops. It
+      already skipped companies with no website; failures are now logged.
+- [x] Per-source badges reach **Company Research** too, not just the directory —
+      that is the screen the sales team trusts most.
+- [x] `.env.example` documents `ALLOWED_ORIGINS` and `LOG_LEVEL`; Supabase's
+      entry now says what breaks without it.
+
+### Stale entries corrected
+
+Two P6 items no longer describe the code:
+
+- **"Overpass hard-caps at 15 results"** — it does not. The 15 is a slice on
+  *Google Places* results (`discovery.py:383`); registry-backed searches return
+  up to 60 and the widening trigger is `< 8` candidates.
+- **"Hunter enrichment is useless in practice"** — it already returns early when
+  a company has no website, so it does not waste quota. The limitation is that
+  registry rows rarely carry a domain, which is a data gap, not a bug.
+
+### Next, in order
+
+1. **Phase 1 finish — MCA Company Master ingest (FREE).** The assumption in
+   §"Known challenges" that MCA data costs money is **wrong**: the full company
+   master is a free public download from
+   [data.gov.in](https://www.data.gov.in/catalog/company-master-data), split per
+   Registrar of Companies as CSV/ZIP, carrying CIN, name, status, class,
+   authorized/paid-up capital, registration date, state, RoC, principal business
+   activity and registered address. That is exactly the Corporate segment
+   `discovery.py` currently fakes with OpenStreetMap. Paid vendors are only
+   needed for *real-time* status and directors, which discovery does not need.
+2. **Phase 2 finish — caching, auth, persistence.** Supabase persistence on
+   every search (so CSV export survives a restart), a shared-token auth gate,
+   and a TTL cache for geocode/MCA results.
+3. **Always-on hosting.** The free Render dyno sleeps, which is what makes
+   `_search_cache` loss and export 404s a recurring problem. This is the one
+   unavoidable recurring cost.
+4. **Phase 3 — Pipeline Radar.** Per-CRA press-release scrapers for
+   withdrawals, INC flags and surveillance dates. Free, but needs one scraper
+   per agency plus PDF parsing.
+
+### Known remaining gaps
+
+- BSE's scrip master carries **no rating agency / credit rating fields**, so the
+  7-agency matrix still rests on NSE disclosures and announcements only
+  (`credit_history.py`, `nse_ratings.py`). P3 is unchanged.
+- Coupon and maturity are parsed from BSE's scrip-id convention
+  (`805BFL26` → 8.05% due 2026), which is a heuristic — it returns blanks for
+  commercial papers and odd ids rather than guessing.
+- Issue date and issue size are not available from the master list.
+- **Issuer matching is exact-only, by design.** Prefix/containment matching was
+  tried and removed: it attributed a parent's debt and CIN to a subsidiary
+  ("REC Power Development" inheriting REC Ltd's bonds, "Bajaj" resolving to
+  Bajaj Global). Showing one company's instruments under another is worse than
+  showing none. Registry names are cleaned of `(Formerly known as ...)` noise
+  first, which is what makes the exact match land — do not reintroduce fuzzy
+  matching to raise coverage. Measured: 27/60 Mumbai NBFCs either way.
+- Contact enrichment remains the weakest link: Hunter's free tier is 25
+  lookups/month and no free source covers Indian mid-cap CFOs.
+- `_guess_entity_type` (`main.py`) is still a name-only heuristic. Left alone
+  deliberately: it runs in exactly one place, only when the 12.8k-entity
+  registry has no answer, and only sets a display label. The CIN's 5-digit NIC
+  code would be more reliable, but mapping NIC ranges to Bank/NBFC/Corporate
+  needs verifying against the real code list before it is worth the risk of
+  mislabelling.
+- **No auth.** Deliberately not added in this pass: a token gate breaks the
+  Vercel frontend until the token is wired into it, so it needs to ship as one
+  coordinated change, not a silent backend edit.

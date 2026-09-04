@@ -1,8 +1,17 @@
+import logging
 import re
+
 import httpx
+
 from backend.config import settings
 
+log = logging.getLogger("acer-iq.contacts")
+
 HUNTER_BASE = "https://api.hunter.io/v2"
+# Hunter's free tier is 25 domain searches per MONTH. One unlucky search over
+# companies that all have websites would spend the whole allowance, so cap it
+# and say so in the log rather than discovering the quota is gone next week.
+MAX_HUNTER_LOOKUPS = 5
 
 EXEC_KEYWORDS = {
     "cfo", "chief financial", "finance director", "managing director",
@@ -32,12 +41,19 @@ async def enrich_contacts(companies: list[dict]) -> list[dict]:
             c["contacts"] = []
         return companies
 
+    used = 0
     async with httpx.AsyncClient(timeout=15) as client:
         for company in companies:
+            company.setdefault("contacts", [])
             domain = _extract_domain(company.get("website", ""))
             if not domain:
-                company["contacts"] = []
                 continue
+            if used >= MAX_HUNTER_LOOKUPS:
+                log.info("Hunter lookup cap (%d) reached — skipping contacts for "
+                         "the remaining leads to protect the monthly quota",
+                         MAX_HUNTER_LOOKUPS)
+                break
+            used += 1
             try:
                 resp = await client.get(
                     f"{HUNTER_BASE}/domain-search",
@@ -66,7 +82,8 @@ async def enrich_contacts(companies: list[dict]) -> list[dict]:
                 other_contacts = [c for c in contacts if not _is_exec(c["position"])]
                 company["contacts"] = (exec_contacts + other_contacts)[:10]
 
-            except Exception:
-                company["contacts"] = []
+            except Exception as e:
+                log.warning("Hunter lookup failed for %s: %s: %s",
+                            domain, type(e).__name__, e)
 
     return companies

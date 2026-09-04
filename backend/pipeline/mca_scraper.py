@@ -2,16 +2,21 @@
 Company master data — CIN, directors, incorporation date, registered address.
 
 Source chain:
-1. BSE equity search → CorpInfo endpoint  (CIN in Table3.fld_cin, directors in Table,
-                                            address in Table1 — fast, reliable, no auth)
-2. BSE debt search → CorpInfo             (same flow for debt-only NBFC issuers)
-3. Zauba Corp direct scrape               (unlisted / private companies)
+1. Cached BSE scrip master → scrip code → CorpInfo  (CIN in Table3.fld_cin,
+   directors in Table, address in Table1 — covers listed + debt issuers)
+2. Zauba Corp direct scrape                         (unlisted / private companies)
 """
 
+import logging
 import re
+
 import httpx
 
-from backend.pipeline.bse_scraper import _bse_record, _bse_tripped, get_bse_client
+from backend.pipeline.bse_scraper import (
+    _bse_record, _bse_tripped, get_bse_client, scrip_code_for,
+)
+
+log = logging.getLogger("acer-iq.mca")
 
 _BSE_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -96,14 +101,21 @@ async def _bse_corp_info(scrip_code: str) -> dict:
                     ),
                 })
 
-            # ── Table3 — Listing date as incorporation proxy ─────────────────
+            # ── Dates ────────────────────────────────────────────────────────
+            # BSE's listing date is NOT the incorporation date — Tata Capital
+            # incorporated in 1991 but listed in 2025. The CIN encodes the real
+            # year of incorporation at chars 8:12, so use that and report the
+            # listing date separately instead of passing it off as incorporation.
             listing_raw = row3.get("lISTING_DATE", "")
-            inc_date    = listing_raw[:10] if listing_raw else ""
+            listing_date = listing_raw[:10] if listing_raw else ""
+            inc_year = cin[8:12] if _CIN_RE.match(cin) else ""
+            inc_date = inc_year if inc_year.isdigit() else ""
 
             if cin:
                 return {
                     "cin":                cin,
                     "incorporation_date": inc_date,
+                    "listing_date":       listing_date,
                     "registered_address": address,
                     "directors":          directors,
                 }
@@ -114,79 +126,26 @@ async def _bse_corp_info(scrip_code: str) -> dict:
 
 # ── BSE equity search → scrip code → CorpInfo ────────────────────────────────
 
-async def _bse_equity_cin(company_name: str) -> dict:
-    """Search BSE equity segment by name to get scrip code, then fetch CorpInfo."""
+async def _bse_scrip_cin(company_name: str) -> dict:
+    """Name -> BSE scrip code -> CorpInfo (CIN, directors, registered address).
+
+    BSE's SearchData/w name-search endpoint is retired (302 to error_Bse.html),
+    so the scrip code now comes from the cached active-scrip master in
+    bse_scraper. CorpInfo itself still works, so this restores CIN and board
+    data for every BSE-listed company and debt issuer.
+    """
     if _bse_tripped():
         return {}
     try:
-        client = get_bse_client()
-        if True:
-            r = await client.get(
-                "https://api.bseindia.com/BseIndiaAPI/api/SearchData/w",
-                params={"strText": company_name, "flag": "0",
-                        "Membertype": "S", "pageno": "1", "tab": "EQ"},
-            )
-            _bse_record(r.status_code == 200)
-            if r.status_code != 200:
-                return {}
-            rows = r.json().get("Table") or []
-            if not rows:
-                return {}
-
-            scrip_code = str(
-                rows[0].get("SCRIP_CD") or rows[0].get("scripCd") or ""
-            ).strip()
-            if not scrip_code:
-                return {}
-    except Exception:
+        scrip_code = await scrip_code_for(company_name)
+    except Exception as e:
+        log.warning("BSE scrip lookup failed for %r: %s: %s",
+                    company_name, type(e).__name__, e)
         return {}
-
+    if not scrip_code:
+        return {}
     return await _bse_corp_info(scrip_code)
 
-
-# ── BSE debt search → scrip code → CorpInfo ──────────────────────────────────
-
-async def _bse_debt_cin(company_name: str) -> dict:
-    """Search BSE debt segment — covers NBFC / debt-only issuers."""
-    if _bse_tripped():
-        return {}
-    try:
-        client = get_bse_client()
-        if True:
-            r = await client.get(
-                "https://api.bseindia.com/BseIndiaAPI/api/SearchData/w",
-                params={"strText": company_name, "flag": "0",
-                        "Membertype": "S", "pageno": "1", "tab": "DEBT"},
-            )
-            _bse_record(r.status_code == 200)
-            if r.status_code != 200:
-                return {}
-            rows = r.json().get("Table") or []
-            if not rows:
-                return {}
-
-            # Debt rows sometimes carry CIN directly
-            direct_cin = (rows[0].get("CIN") or rows[0].get("cin") or "").strip()
-            if direct_cin and _CIN_RE.match(direct_cin):
-                return {
-                    "cin":                direct_cin,
-                    "incorporation_date": "",
-                    "registered_address": "",
-                    "directors":          [],
-                }
-
-            # Otherwise use scrip code to fetch CorpInfo
-            scrip_code = str(
-                rows[0].get("SCRIP_CD") or rows[0].get("scripCd") or ""
-            ).strip()
-            if scrip_code:
-                return await _bse_corp_info(scrip_code)
-    except Exception:
-        pass
-    return {}
-
-
-# ── Zauba Corp scrape — fallback for unlisted/private companies ───────────────
 
 async def _zauba_cin(company_name: str) -> dict:
     """Scrape Zauba Corp search page — works for unlisted/private companies."""
@@ -261,9 +220,7 @@ async def fetch_mca_data(company_name: str, skip_zauba: bool = False) -> dict:
     if key in _cache:
         return _cache[key]
 
-    result = await _bse_equity_cin(company_name)
-    if not result.get("cin"):
-        result = await _bse_debt_cin(company_name)
+    result = await _bse_scrip_cin(company_name)
     if not result.get("cin") and not skip_zauba:
         result = await _zauba_cin(company_name)
 
@@ -309,4 +266,5 @@ def _extract_directors(soup) -> list[dict]:
 
 
 def _empty() -> dict:
-    return {"cin": "", "incorporation_date": "", "directors": [], "registered_address": ""}
+    return {"cin": "", "incorporation_date": "", "listing_date": "",
+            "directors": [], "registered_address": ""}

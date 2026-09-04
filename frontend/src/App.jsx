@@ -7,6 +7,7 @@ import CompanyResearchPage from "./components/company/CompanyResearchPage.jsx";
 import MarketNewsPage from "./components/MarketNewsPage.jsx";
 import SignalRadarPage from "./components/SignalRadarPage.jsx";
 import ComingSoon from "./components/ComingSoon.jsx";
+import SourceHealth from "./components/SourceHealth.jsx";
 import { apiUrl } from "./lib/api.js";
 
 const MAPS_API_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY ?? "";
@@ -120,6 +121,7 @@ export default function App() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [searchId, setSearchId] = useState(null);
+  const [sources, setSources] = useState([]);
   const [searchLocation, setSearchLocation] = useState("");
   const [searchEntity, setSearchEntity] = useState("");
   const [searchInstrument, setSearchInstrument] = useState("");
@@ -199,6 +201,7 @@ export default function App() {
       setCityLat(data.city_lat);
       setCityLng(data.city_lng);
       setSearchId(data.search_id);
+      setSources(data.sources ?? []);
     } catch (e) {
       setError(e.message ?? "Search failed. Please try again.");
     } finally {
@@ -263,6 +266,12 @@ export default function App() {
               <span className="ml-2 text-xs text-red-500">
                 (Make sure the backend is running: <code className="font-mono">uvicorn backend.main:app --reload --port 8000</code>)
               </span>
+            </div>
+          )}
+
+          {!loading && !error && (sources ?? []).some((s) => !s.ok) && (
+            <div className="shrink-0 border-b border-gray-100 bg-white px-5 py-2">
+              <SourceHealth sources={sources} />
             </div>
           )}
 
