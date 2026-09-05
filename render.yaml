@@ -4,11 +4,24 @@ services:
     runtime: python
     buildCommand: pip install -r requirements.txt
     startCommand: uvicorn backend.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /api/health
     envVars:
       - key: OPENROUTER_API_KEY
+        sync: false
+      # Fallback LLM, used when OpenRouter has no key or is rate-limited
+      - key: TOKENROUTER_API_KEY
         sync: false
       - key: GOOGLE_PLACES_API_KEY
         sync: false
       - key: HUNTER_API_KEY
         sync: false
+      # Search persistence — without it a restart loses cached searches and
+      # CSV export 404s
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_KEY
+        sync: false
+      # This service ships no UI build, so browsers hitting it are sent here
+      - key: FRONTEND_URL
+        value: https://acer-iq.vercel.app
     plan: free

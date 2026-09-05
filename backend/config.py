@@ -16,6 +16,10 @@ class Settings(BaseSettings):
     # (any *.vercel.app deploy + localhost dev), which is what prod uses.
     allowed_origins: str = ""
     log_level: str = "INFO"
+    # Where the built UI lives when this process has no frontend/dist of its
+    # own (the Render backend). Opening the API host then lands on the app
+    # instead of a 404 or the Swagger page.
+    frontend_url: str = "https://acer-iq.vercel.app"
 
     class Config:
         env_file = ".env"

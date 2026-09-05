@@ -88,6 +88,13 @@ real scraping work.
 
 ## Done (2026-09-04)
 
+- [x] **The backend URL renders the app.** `https://acer-iq.onrender.com/`
+      answered `{"detail":"Not Found"}` and its only human-readable page was
+      `/docs` (Swagger), so opening the API host showed a guide instead of the
+      product. `/` now serves `frontend/dist` when a build is present, and
+      otherwise redirects to `FRONTEND_URL` — deep links preserved. Liveness
+      moved to `/api/health` so `/` stays free for the UI.
+
 - [x] **BSE data path restored.** Both debt *search* endpoints were retired by
       BSE (302 to `error_Bse.html`), silently emptying past instruments, CIN,
       directors, addresses and autocomplete. Replaced with the still-live

@@ -171,6 +171,25 @@ def test_reasoning_model_gets_token_headroom():
         settings.tokenrouter_api_key = orig
 
 
+def test_catch_all_route_never_shadows_the_api():
+    """The browser catch-all must be registered last, or "/{path:path}" eats
+    /api/* and /docs and the whole API 307s to the frontend."""
+    paths = [getattr(r, "path", "") for r in main.app.routes]
+    catch_alls = [i for i, p in enumerate(paths) if "{path:path}" in p]
+    if not catch_alls:
+        return  # a frontend build is present, so no redirect routes exist
+    first_catch_all = min(catch_alls)
+    for i, p in enumerate(paths):
+        if p.startswith("/api/") or p in ("/docs", "/openapi.json"):
+            assert i < first_catch_all, f"{p} is shadowed by the catch-all"
+
+
+def test_health_is_not_on_the_root_path():
+    """Liveness lives at /api/health so "/" stays free to serve the UI."""
+    paths = {getattr(r, "path", "") for r in main.app.routes}
+    assert "/api/health" in paths
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("test_"):

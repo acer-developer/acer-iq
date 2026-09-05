@@ -11,7 +11,7 @@ from pathlib import Path
 import httpx
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -534,7 +534,43 @@ async def export_csv(search_id: str):
     )
 
 
-# ── Serve React build in production ──────────────────────────────────────────
-_frontend_dist = Path(__file__).parent.parent / "frontend" / "dist"
-if _frontend_dist.exists():
-    app.mount("/", StaticFiles(directory=str(_frontend_dist), html=True), name="static")
+# ── Serve the app ────────────────────────────────────────────────────────────
+# Opening this service in a browser must render ACER-IQ. Two ways that happens:
+#
+#   1. A build sits next to us (local dev after `npm run build`, or any host
+#      that builds both halves) -> serve it directly, same origin, no CORS.
+#   2. There is no build here (the Render backend only installs Python deps)
+#      -> send the browser to wherever the UI is deployed.
+#
+# Without case 2 the API host answers "/" with {"detail":"Not Found"} and the
+# only human-readable page is /docs, so anyone opening the backend URL gets
+# Swagger instead of the product.
+
+
+@app.get("/api/health")
+async def health():
+    """Liveness for uptime checks — kept off "/" so the root can serve the UI."""
+    return {
+        "status": "ok",
+        "version": app.version,
+        "ui": "bundled" if _FRONTEND_DIST.exists() else settings.frontend_url,
+        "sources": _source_status(0),
+    }
+
+
+_FRONTEND_DIST = Path(__file__).parent.parent / "frontend" / "dist"
+
+if _FRONTEND_DIST.exists():
+    app.mount("/", StaticFiles(directory=str(_FRONTEND_DIST), html=True), name="static")
+else:
+    log.info("no frontend/dist here — redirecting browsers to %s",
+             settings.frontend_url)
+
+    @app.get("/", include_in_schema=False)
+    async def root_to_app():
+        return RedirectResponse(settings.frontend_url)
+
+    @app.get("/{path:path}", include_in_schema=False)
+    async def any_page_to_app(path: str):
+        # Only browser routes land here; /api/* and /docs are matched earlier.
+        return RedirectResponse(f"{settings.frontend_url}/{path}")
