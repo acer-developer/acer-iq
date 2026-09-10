@@ -97,6 +97,33 @@ def _llm_configured() -> bool:
     return bool(_providers())
 
 
+def _cra_status() -> list[dict]:
+    """Per-agency scrape health, so a dark scraper is visible to uptime checks.
+
+    Without this the four CRA sources are invisible: `_source_status` only knows
+    about labels that failed inside a request, so an agency whose circuit breaker
+    is open between requests looks perfectly healthy. Seven sites with no APIs
+    and no contract will break, and a silently dark pipeline is the failure mode
+    this product cannot afford."""
+    from backend.pipeline import cra_press
+
+    out = []
+    for name, state in cra_press._breaker.items():
+        tripped = cra_press._tripped(name)
+        out.append({
+            "name": f"CRA:{name}",
+            "ok": not tripped,
+            "detail": "circuit breaker open - site unreachable or blocking" if tripped else "",
+        })
+    for name in cra_press._STATICALLY_BLOCKED:
+        out.append({
+            "name": f"CRA:{name}",
+            "ok": True,   # known and intended, not a fault to alert on
+            "detail": "no scrape path - see CRA_ENDPOINTS.md",
+        })
+    return out
+
+
 def _source_status(total: int) -> list[dict]:
     """What each data source did on this request - surfaced in the response so
     the UI can badge a degraded source instead of implying an empty truth."""
@@ -584,11 +611,21 @@ async def export_csv(search_id: str):
 @app.get("/api/health")
 async def health():
     """Liveness for uptime checks - kept off "/" so the root can serve the UI."""
+    _failures.set(Counter())
+    sources = _source_status(0) + _cra_status()
+    degraded = [s["name"] for s in sources if not s["ok"]]
+    if degraded:
+        # Logged at WARNING so an always-on host's log alerting can fire on it
+        # without anything having to poll this endpoint.
+        log.warning("health: degraded sources %s", ", ".join(degraded))
     return {
-        "status": "ok",
+        # "ok" still means the process is alive; "degraded" is the signal an
+        # uptime check should page on, and it must not be buried in a sub-list.
+        "status": "degraded" if degraded else "ok",
         "version": app.version,
         "ui": "bundled" if _FRONTEND_DIST.exists() else settings.frontend_url,
-        "sources": _source_status(0),
+        "degraded": degraded,
+        "sources": sources,
     }
 
 

@@ -3,6 +3,7 @@
     python -m backend.test_hardening
 """
 import asyncio
+import time
 from collections import Counter
 
 from backend import main
@@ -369,6 +370,55 @@ def test_care_lookups_are_cached_including_misses():
         cra_press._get_client = real_client
         cra_press._cache.clear()
         cra_press._cache.update(real_cache)
+
+
+# -- Source-health alarms (ROADMAP_V3 phase 1) -------------------------------
+
+def test_health_reports_every_cra_scraper():
+    """A dark scraper must be visible to an uptime check. _source_status alone
+    only knows about labels that failed inside a request, so an agency whose
+    breaker opened between requests would look perfectly healthy."""
+    h = asyncio.run(main.health())
+    names = {s["name"] for s in h["sources"]}
+    for agency in ("ACUITE", "BRICKWORK", "INDRA", "CARE", "CRISIL", "ICRA", "INFOMERICS"):
+        assert f"CRA:{agency}" in names, f"{agency} missing from health"
+
+
+def test_health_goes_degraded_when_a_breaker_is_open():
+    from backend.pipeline import cra_press
+    saved = dict(cra_press._breaker["ACUITE"])
+    try:
+        cra_press._breaker["ACUITE"]["until"] = time.time() + 600
+        h = asyncio.run(main.health())
+        assert h["status"] == "degraded", h["status"]
+        assert "CRA:ACUITE" in h["degraded"]
+    finally:
+        cra_press._breaker["ACUITE"].update(saved)
+
+
+def test_health_is_ok_when_nothing_is_tripped():
+    h = asyncio.run(main.health())
+    assert h["status"] == "ok" and h["degraded"] == []
+
+
+def test_a_statically_blocked_agency_is_not_an_alarm():
+    """CRISIL/ICRA/Infomerics have no scrape path by design. Alerting on them
+    would train whoever is on call to ignore this endpoint."""
+    h = asyncio.run(main.health())
+    blocked = [s for s in h["sources"] if s["name"] == "CRA:CRISIL"]
+    assert blocked and blocked[0]["ok"] is True and blocked[0]["detail"]
+
+
+# -- Bounded caches ----------------------------------------------------------
+
+def test_mca_and_geocode_caches_expire_and_are_bounded():
+    """Both were plain dicts that never evicted. On the always-on host phase 1
+    calls for, that grows for the life of the process and serves stale data
+    forever."""
+    from backend.pipeline import mca_scraper, discovery
+    for cache in (mca_scraper._cache, discovery._geo_cache):
+        assert cache.ttl > 0, "a cache with no TTL serves stale data forever"
+        assert cache.maxsize > 0, "an unbounded lookup cache is a slow leak"
 
 
 if __name__ == "__main__":

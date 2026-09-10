@@ -7,6 +7,26 @@ in `roadmap-evolution.html`.
 
 Legend: **FREE** = no new spend · **PAID** = costs money · **DECISION** = needs your call.
 
+## Where this actually stands
+
+**Working end to end:** CRA sites -> scored, ranked, credit-screened queue on
+screen. 4 of 7 agencies readable. 36 tests, four module self-checks, all offline.
+
+**Not done, and honest about why:**
+
+| Gap | Blocked on |
+|---|---|
+| Logins, saved leads, search persistence | a Supabase project URL + key. After that it is configuration, not a build. |
+| Renewal calendar (surveillance dates) | rationale-PDF parsing per agency. Multi-session. |
+| MCA first-timer join | bulk registry ingest + geocoding. Multi-session. |
+| Always-on hosting | your call: Oracle Cloud Always Free, or ~$7/mo. |
+| Outcome-driven scoring weights | six months of outcome data that does not exist yet. |
+
+**The live number, so it is not oversold:** 54 leads, 1 workable, 26 blocked.
+That is the credit screen working, not a bug - Acuite and Brickwork's published
+book is mostly sub-investment-grade MSME paper. Volume has to come from the
+renewal calendar and the MCA join, both still ahead.
+
 ---
 
 ## Phase 0 - Two audits, no code
@@ -38,14 +58,23 @@ Everything downstream sits on this. Nothing here is glamorous.
       must ship together or the Vercel frontend breaks. Right now anyone with the
       URL can burn our quotas. Supersedes the shared-token idea: use Supabase Auth,
       which Phase 3 needs anyway.
-- [ ] **Source-health alarms** - **FREE** - the `sources[]` block already reports
-      health per request; nothing *notifies* when a scraper goes dark. Seven CRA
-      sites with no APIs will break silently otherwise.
+- [x] **Source-health alarms** - `/api/health` now reports all seven CRA scrapers
+      (`_cra_status`), returns `status: "degraded"` with a `degraded[]` list when
+      any breaker is open, and logs that at WARNING so an always-on host's log
+      alerting fires without anything polling the endpoint. Statically blocked
+      agencies report ok-with-detail, deliberately: alerting on a known gap
+      trains whoever is on call to ignore the endpoint.
 - [ ] **Always-on backend** - **FREE or ~$7/mo** - the free Render dyno sleeps,
       which is the root cause of lost caches and export 404s. Oracle Cloud Always
       Free ARM VM makes this cost nothing; ~$7/mo buys less hassle.
-- [ ] **TTL cache for geocode and MCA lookups** - **FREE** - the same company is
-      re-fetched on every search.
+- [x] **TTL cache for geocode and MCA lookups** - both were plain dicts that
+      never expired or bounded, which on the always-on host below means growing
+      for the life of the process and serving a stale CIN forever. Now
+      `backend/pipeline/ttl_cache.py` (`TTLCache`), 12h/2000 for MCA and
+      24h/1000 for geocode. The centre-of-India geocode fallback is
+      deliberately not cached, so a failed lookup is not pinned for a day.
+      Not `functools.lru_cache`: these callers are async and need clock-based
+      expiry, which lru_cache has no concept of.
 
 ## Phase 2 - Winnability engine (the product)
 
@@ -117,10 +146,10 @@ background job**: everything happens on request.
 | India Ratings | live, on request | 15 min | latest ~10 actions |
 | CARE | per company, on demand | 6 hours | that company's current rating book |
 
-So the first request after the cache expires is genuinely real-time and takes
-about 6 seconds; requests inside the window are instant and reuse it. CARE is
-held far longer because a company's own rating book moves on a surveillance
-cycle, not hourly.
+Measured on the live endpoint: **22.5s on a cold cache, 0.78s warm.** The cold
+cost is dominated by the CARE enrichment (15 leads x 2 calls), not the feeds.
+CARE is held far longer than the feeds because a company's own rating book
+moves on a surveillance cycle, not hourly.
 
 **The `days` parameter filters locally, it does not ask for more history.** These
 feeds are latest-page snapshots, so `days=365` returns the same rows as

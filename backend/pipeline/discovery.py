@@ -1,6 +1,8 @@
 import httpx
 from backend.config import settings
 
+from backend.pipeline.ttl_cache import TTLCache
+
 PLACES_BASE  = "https://maps.googleapis.com/maps/api/place"
 NOMINATIM    = "https://nominatim.openstreetmap.org/search"
 OVERPASS_URL = "https://overpass-api.de/api/interpreter"
@@ -97,10 +99,20 @@ def _parse_city(location: str) -> str:
 
 # ── Geocoding ─────────────────────────────────────────────────────────────────
 
+# Nominatim asks callers not to hammer it, and the same city is re-geocoded on
+# every single search. Coordinates do not move, so this can be held for a day.
+_geo_cache = TTLCache(ttl=24 * 3600, maxsize=1000)
+
+
 async def _geocode(location: str) -> tuple[float, float]:
     city = _parse_city(location).lower()
     if city in _CITY_COORDS:
         return _CITY_COORDS[city]
+
+    cache_key = location.strip().lower()
+    hit = _geo_cache.get(cache_key)
+    if hit is not None:
+        return hit
 
     try:
         async with httpx.AsyncClient(timeout=10, headers=_HEADERS) as client:
@@ -110,7 +122,9 @@ async def _geocode(location: str) -> tuple[float, float]:
             })
             results = resp.json()
             if results:
-                return float(results[0]["lat"]), float(results[0]["lon"])
+                found = float(results[0]["lat"]), float(results[0]["lon"])
+                _geo_cache.set(cache_key, found)
+                return found
     except Exception:
         pass
 
@@ -124,10 +138,14 @@ async def _geocode(location: str) -> tuple[float, float]:
                 })
                 results = resp.json()
                 if results:
-                    return float(results[0]["lat"]), float(results[0]["lon"])
+                    found = float(results[0]["lat"]), float(results[0]["lon"])
+                    _geo_cache.set(cache_key, found)
+                    return found
         except Exception:
             pass
 
+    # Deliberately NOT cached: this is the centre-of-India fallback, and
+    # caching it would pin a failed lookup for a day.
     return 20.5937, 78.9629
 
 

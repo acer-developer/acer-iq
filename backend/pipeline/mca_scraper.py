@@ -15,6 +15,7 @@ import httpx
 from backend.pipeline.bse_scraper import (
     _bse_record, _bse_tripped, get_bse_client, scrip_code_for,
 )
+from backend.pipeline.ttl_cache import TTLCache
 
 log = logging.getLogger("acer-iq.mca")
 
@@ -205,7 +206,10 @@ async def _zauba_cin(company_name: str) -> dict:
 
 # ── Public entry point ────────────────────────────────────────────────────────
 
-_cache: dict[str, dict] = {}
+# Bounded and expiring: this used to be a plain dict that never evicted, so
+# on a long-running server it grew for the life of the process and served a
+# stale CIN forever. A company's CIN and directors change rarely, hence 12h.
+_cache = TTLCache(ttl=12 * 3600, maxsize=2000)
 
 
 async def fetch_mca_data(company_name: str, skip_zauba: bool = False) -> dict:
@@ -217,15 +221,16 @@ async def fetch_mca_data(company_name: str, skip_zauba: bool = False) -> dict:
     matters more than director coverage (e.g. bulk search enrichment).
     """
     key = company_name.strip().lower()
-    if key in _cache:
-        return _cache[key]
+    hit = _cache.get(key)
+    if hit is not None:
+        return hit
 
     result = await _bse_scrip_cin(company_name)
     if not result.get("cin") and not skip_zauba:
         result = await _zauba_cin(company_name)
 
     result = result if result.get("cin") else _empty()
-    _cache[key] = result
+    _cache.set(key, result)
     return result
 
 
