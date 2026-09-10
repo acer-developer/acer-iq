@@ -421,6 +421,92 @@ def test_mca_and_geocode_caches_expire_and_are_bounded():
         assert cache.maxsize > 0, "an unbounded lookup cache is a slow leak"
 
 
+# -- Saved leads + outcome log (ROADMAP_V3 phase 3) --------------------------
+
+def _temp_store():
+    """pipeline_store pointed at a throwaway DB. Returns (module, cleanup)."""
+    import tempfile
+    from pathlib import Path
+    from backend.pipeline import pipeline_store as ps
+    tmp = tempfile.mkdtemp()
+    real = ps.DB_PATH
+    ps.DB_PATH = Path(tmp) / "t.sqlite"
+
+    def cleanup():
+        ps.DB_PATH = real
+    return ps, cleanup
+
+
+def test_saving_the_same_lead_twice_does_not_reset_its_stage():
+    """Two people clicking Add on one company must not drag a lead that is
+    already at Proposal back to Identified."""
+    ps, cleanup = _temp_store()
+    try:
+        ps.save_lead({"company_name": "Acme Ltd", "winnability": 50, "flags": {}})
+        ps.set_stage("Acme Ltd", "Proposal")
+        again = ps.save_lead({"company_name": "Acme Ltd"})
+        assert again["already_saved"] is True
+        assert again["stage"] == "Proposal", again
+    finally:
+        cleanup()
+
+
+def test_an_unknown_stage_is_refused_not_written():
+    """Otherwise the funnel quietly grows categories nobody can report on."""
+    ps, cleanup = _temp_store()
+    try:
+        ps.save_lead({"company_name": "Acme Ltd"})
+        try:
+            ps.set_stage("Acme Ltd", "Nearly There")
+            raise AssertionError("unknown stage should have been refused")
+        except ValueError:
+            pass
+        assert ps.funnel()["Identified"] == 1
+    finally:
+        cleanup()
+
+
+def test_outcome_history_survives_removing_a_lead():
+    """A lead that was worked and dropped is exactly the outcome data the
+    winnability weights need. Deleting the history would throw it away."""
+    ps, cleanup = _temp_store()
+    try:
+        ps.save_lead({"company_name": "Acme Ltd", "flags": {"inc_tagged": True}})
+        ps.set_stage("Acme Ltd", "Lost")
+        assert ps.remove_lead("Acme Ltd") is True
+        assert ps.list_leads() == []
+        events = [e["event"] for e in ps.events("Acme Ltd")]
+        assert events == ["removed", "stage", "saved"], events
+    finally:
+        cleanup()
+
+
+def test_saved_lead_json_columns_are_decoded_consistently():
+    """The same field must not be a dict on one endpoint and a JSON string on
+    another, or a caller renders a quoted blob at someone."""
+    ps, cleanup = _temp_store()
+    try:
+        lead = {"company_name": "Acme Ltd", "flags": {"multi_cra": True},
+                "agencies_seen": ["CARE"]}
+        ps.save_lead(lead)
+        again = ps.save_lead(lead)
+        listed = ps.list_leads()[0]
+        assert again["flags"] == listed["flags"] == {"multi_cra": True}
+        assert again["agencies"] == listed["agencies"] == ["CARE"]
+    finally:
+        cleanup()
+
+
+def test_lead_routes_are_registered_and_events_is_not_a_company_name():
+    """/api/leads/events must be declared before /api/leads/{company_name},
+    or "events" gets captured as a company."""
+    paths = [getattr(r, "path", "") for r in main.app.routes]
+    for p in ("/api/leads", "/api/leads/events", "/api/leads/{company_name}",
+              "/api/leads/{company_name}/stage"):
+        assert p in paths, f"{p} missing"
+    assert paths.index("/api/leads/events") < paths.index("/api/leads/{company_name}")
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("test_"):

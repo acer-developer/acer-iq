@@ -38,3 +38,6 @@ __pycache__
 
 # archify visual-check artifacts (regenerated on demand)
 *.visual-check.*
+
+# local pipeline database (saved leads + outcome log)
+backend/registry/data/pipeline.sqlite

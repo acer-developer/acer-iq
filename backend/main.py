@@ -29,6 +29,7 @@ from backend.pipeline.credit_history import fetch_credit_history
 from backend.pipeline.fit_analyzer import analyze_fit
 from backend.pipeline import winnability as winnability_scorer
 from backend.pipeline.lead_queue import build_queue
+from backend.pipeline import pipeline_store
 from backend.pipeline.market_news import fetch_market_news
 from backend.pipeline.rss_news import fetch_rss_news
 from backend.pipeline.sector_indices import fetch_sector_indices
@@ -329,6 +330,64 @@ async def get_queue(days: int = 30, enrich: int = 15):
                           "note": "Queue could not be built - no CRA source answered."}}
     data = await _safe(build_queue(days=days, enrich=enrich), empty, "cra_press")
     return {**data, "sources": _source_status(1)}
+
+
+# ── My Pipeline: saved leads + outcome log (ROADMAP_V3 phase 3) ──────────────
+# No accounts yet, so this is one shared list for the whole BD team. Per-user
+# separation needs auth, and no Supabase project exists yet.
+
+class SaveLeadRequest(BaseModel):
+    company_name: str
+    winnability: int | None = None
+    flags: dict | None = None
+    agencies_seen: list[str] | None = None
+
+
+class StageRequest(BaseModel):
+    stage: str
+    note: str = ""
+
+
+@app.get("/api/leads")
+async def get_saved_leads(stage: str | None = None):
+    return {"leads": pipeline_store.list_leads(stage),
+            "funnel": pipeline_store.funnel(),
+            "stages": pipeline_store.STAGES}
+
+
+@app.get("/api/leads/events")
+async def get_lead_events(company_name: str | None = None, limit: int = 200):
+    """The outcome log. This is what eventually lets the winnability weights be
+    fitted to what actually converts, instead of staying flat guesses.
+
+    Declared before /api/leads/{company_name} routes so "events" is not captured
+    as a company name."""
+    return {"events": pipeline_store.events(company_name, min(max(limit, 1), 1000))}
+
+
+@app.post("/api/leads")
+async def add_saved_lead(req: SaveLeadRequest):
+    try:
+        return pipeline_store.save_lead(req.model_dump())
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.post("/api/leads/{company_name}/stage")
+async def move_saved_lead(company_name: str, req: StageRequest):
+    try:
+        return pipeline_store.set_stage(company_name, req.stage, req.note)
+    except KeyError:
+        raise HTTPException(status_code=404, detail=f"{company_name} is not saved")
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.delete("/api/leads/{company_name}")
+async def delete_saved_lead(company_name: str):
+    if not pipeline_store.remove_lead(company_name):
+        raise HTTPException(status_code=404, detail=f"{company_name} is not saved")
+    return {"removed": company_name}
 
 
 # ── Sector Indices (Signal Radar) ────────────────────────────────────────────

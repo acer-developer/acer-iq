@@ -16,7 +16,8 @@ screen. 4 of 7 agencies readable. 36 tests, four module self-checks, all offline
 
 | Gap | Blocked on |
 |---|---|
-| Logins, saved leads, search persistence | a Supabase project URL + key. After that it is configuration, not a build. |
+| Logins (per-user lists) | a Supabase project. **There isn't one** - every `.env` in the tree still has the README's `your_url_here` placeholders. Saved leads now run on SQLite instead, as one shared team list. |
+| Search persistence (`/api/export/{id}`) | same. `_search_cache` is still in-process. |
 | Renewal calendar (surveillance dates) | rationale-PDF parsing per agency. Multi-session. |
 | MCA first-timer join | bulk registry ingest + geocoding. Multi-session. |
 | Always-on hosting | your call: Oracle Cloud Always Free, or ~$7/mo. |
@@ -51,9 +52,13 @@ Everything downstream sits on this. Nothing here is glamorous.
       in-process, so a restart loses it and `/api/export/{id}` 404s. The code path
       exists and logs loudly; it needs `SUPABASE_URL` / `SUPABASE_KEY` set and the
       `searches` table created.
-- [ ] **Outcome logging schema** - **FREE** - every lead carries the signal that
-      produced it, and its eventual outcome. Must land *before* any lead is
-      generated, or the winnability score stays opinion for another six months.
+- [x] **Outcome logging schema** - built in `backend/pipeline/pipeline_store.py`
+      on stdlib sqlite3, same pattern as `backend/registry/store.py`. Every save
+      and every stage change appends to `lead_events` carrying the flags that
+      produced the lead, so it becomes possible to ask later which signal
+      actually converts. History is deliberately kept when a lead is removed:
+      worked-and-dropped is precisely the outcome data the weights need.
+      Read it at `GET /api/leads/events`.
 - [ ] **Auth gate + CORS lockdown** - **FREE** - **DECISION**: backend and frontend
       must ship together or the Vercel frontend breaks. Right now anyone with the
       URL can burn our quotas. Supersedes the shared-token idea: use Supabase Auth,
@@ -177,13 +182,23 @@ day's snapshot, and neither is built.
       another, investment grade, so the credit screen passes it. Verified by hand
       against both agencies' live data. An unreachable backend renders as an
       error, never as an empty queue.
-- [ ] **A login per BD user** - **FREE** - Supabase Auth (email or Google). Already
-      a dependency, so this is configuration, not a build.
-- [ ] **Saved leads** - **FREE** - a `saved_leads` table with row-level security so
-      each user reads and writes only their own rows. One Add button writes one row
-      and drops the lead into that user's pipeline at stage Identified.
-- [ ] **Pipeline tab** - lead lifecycle (Identified → Contacted → Meeting → Proposal
-      → Mandated / Lost), owner, notes, follow-up dates, source tagging.
+- [ ] **A login per BD user** - **BLOCKED, needs a Supabase project.** Supabase is
+      in `requirements.txt` and `backend/database.py`, but was never actually set
+      up: every `.env` still carries the README's `your_url_here` placeholders.
+      Until then the pipeline is one shared list. Do **not** hand-roll auth for
+      this; it is the one part of the app where rolling our own is the wrong call.
+- [x] **Saved leads** - on SQLite, as **one shared list for the team**, not
+      per-user: row-level security needs auth, and there is no Supabase project.
+      The Add button in the queue now really persists, shows Saved once stored,
+      and surfaces a failure inline rather than silently pretending. Saving is
+      idempotent server-side, so clicking Add on a company already at Proposal
+      will not reset it. `GET/POST /api/leads`, `POST /api/leads/{name}/stage`,
+      `DELETE /api/leads/{name}`.
+- [~] **Pipeline tab** - the *backend* is done: stages Identified, Contacted,
+      Meeting, Proposal, Mandated, Lost, plus notes, funnel counts and full event
+      history, all served from `/api/leads`. Unknown stages are refused rather
+      than written. **Still to build: the UI for it.** Today a lead can be saved
+      from the queue, but only moved along the pipeline via the API.
 - [ ] **De-duplicate leads across searches**, keyed on CIN.
 - [ ] **Briefing surface** - **FREE** - news attached to names already in the
       pipeline, not a global feed. Add BusinessLine, Moneycontrol and Business

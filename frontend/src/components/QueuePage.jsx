@@ -1,12 +1,23 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { apiUrl } from "../lib/api.js";
 
-// ROADMAP_V3 Phase 1: Supabase auth/persistence isn't wired up yet. This is a
-// stub so the "Add" button does something visible without pretending to save.
-// TODO(supabase): once auth exists, POST this lead to a `saved_leads` table
-// scoped to the logged-in user's id instead of just logging it.
-function saveLead(lead) {
-  console.log("[stub] saveLead - would persist to Supabase once auth exists:", lead);
+// Saves to the shared SQLite pipeline (backend/pipeline/pipeline_store.py).
+// One list for the whole BD team: per-user lists need auth, and no Supabase
+// project exists yet. The save is idempotent server-side, so clicking Add on a
+// company already at Proposal will not reset it to Identified.
+async function saveLead(lead) {
+  const res = await fetch(apiUrl("/api/leads"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      company_name: lead.company_name,
+      winnability: lead.winnability,
+      flags: lead.flags,
+      agencies_seen: lead.agencies_seen,
+    }),
+  });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.json();
 }
 
 const FLAG_META = {
@@ -55,7 +66,7 @@ function WinnabilityBadge({ lead }) {
   );
 }
 
-function QueueRow({ lead, onAdd }) {
+function QueueRow({ lead, onAdd, saved, busy, addError }) {
   const rowCls = lead.blocked
     ? "bg-white border-l-4 border-l-red-400"
     : lead.suppressed
@@ -94,16 +105,22 @@ function QueueRow({ lead, onAdd }) {
         ) : (
           <SignalChips flags={lead.flags} reasons={lead.reasons} />
         )}
+        {addError && (
+          <p className="mt-1.5 text-xs font-medium text-red-700">
+            Could not save: {addError}
+          </p>
+        )}
       </div>
 
       <button
         onClick={() => onAdd(lead)}
-        disabled={lead.blocked}
+        disabled={lead.blocked || saved || busy}
         className="shrink-0 rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-medium text-gray-600
           transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-40"
-        title={lead.blocked ? "Blocked leads can't be added" : "Add to my list"}
+        title={lead.blocked ? "Blocked leads can't be added"
+                : saved ? "Already in the pipeline" : "Add to the pipeline"}
       >
-        + Add
+        {saved ? "\u2713 Saved" : busy ? "Saving\u2026" : "+ Add"}
       </button>
     </div>
   );
@@ -114,6 +131,29 @@ export default function QueuePage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [coverage, setCoverage] = useState(null);
+  const [saved, setSaved] = useState(() => new Set());
+  const [busy, setBusy] = useState(() => new Set());
+  const [addErrors, setAddErrors] = useState({});
+
+  const handleAdd = useCallback(async (lead) => {
+    const name = lead.company_name;
+    setBusy((b) => new Set(b).add(name));
+    setAddErrors((e) => ({ ...e, [name]: undefined }));
+    try {
+      await saveLead(lead);
+      setSaved((s) => new Set(s).add(name));
+    } catch (err) {
+      // Never fail silently: someone would believe a lead is tracked when it
+      // is not, and act on that belief.
+      setAddErrors((e) => ({ ...e, [name]: err.message }));
+    } finally {
+      setBusy((b) => {
+        const next = new Set(b);
+        next.delete(name);
+        return next;
+      });
+    }
+  }, []);
 
   const fetchQueue = useCallback(async () => {
     setLoading(true);
@@ -124,6 +164,16 @@ export default function QueuePage() {
       const data = await res.json();
       setLeads(data.leads ?? []);
       setCoverage(data.coverage ?? null);
+      try {
+        const savedRes = await fetch(apiUrl("/api/leads"));
+        if (savedRes.ok) {
+          const s = await savedRes.json();
+          setSaved(new Set((s.leads ?? []).map((l) => l.company_name)));
+        }
+      } catch {
+        // The queue is still usable if the pipeline list is unavailable;
+        // rows just show as unsaved rather than the page failing.
+      }
     } catch (e) {
       // "Couldn't reach the queue" must never render as "no leads today".
       setLeads([]);
@@ -216,7 +266,14 @@ export default function QueuePage() {
       {!loading && sorted.length > 0 && (
         <div className="flex-1 overflow-y-auto">
           {sorted.map((lead) => (
-            <QueueRow key={lead.company_name} lead={lead} onAdd={saveLead} />
+            <QueueRow
+              key={lead.company_name}
+              lead={lead}
+              onAdd={handleAdd}
+              saved={saved.has(lead.company_name)}
+              busy={busy.has(lead.company_name)}
+              addError={addErrors[lead.company_name]}
+            />
           ))}
         </div>
       )}
