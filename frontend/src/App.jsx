@@ -14,7 +14,7 @@ import { apiUrl } from "./lib/api.js";
 const MAPS_API_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY ?? "";
 
 const TAB_INFO = {
-  queue: "One ranked list, highest winnability first. Winnability is not need — every CRA sees the same downgrade at the same hour. It asks whether ACER can realistically win the mandate: first-time borrowers, issuers tagged Issuer Not Cooperating, self-withdrawn ratings, and proven multi-CRA shoppers. A credit screen sits on top and can block a lead outright — that is different from a lead simply being low winnability.",
+  queue: "One ranked list, highest winnability first. Winnability is not need - every CRA sees the same downgrade at the same hour. It asks whether ACER can realistically win the mandate: first-time borrowers, issuers tagged Issuer Not Cooperating, self-withdrawn ratings, and proven multi-CRA shoppers. A credit screen sits on top and can block a lead outright - that is different from a lead simply being low winnability.",
   radar: "Monitors public signals that indicate a company needs a credit rating soon: NCD/bond board approvals, rating withdrawals, surveillance renewals, and bank loan rating expirations. Signals come from BSE/NSE exchange filings and CRA press releases.",
   news: "Tracks corporate announcements from NSE that signal upcoming funding needs: expansion plans, capex approvals, fund raising resolutions, acquisitions, and rating actions. Every item is a real exchange filing, not a prediction.",
   research: "Look up any Indian company to see its credit rating history across all SEBI-registered agencies. Shows which agencies currently rate the company and identifies opportunities for ACER: first-time mandates, second opinions, or renewals.",

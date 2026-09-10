@@ -3,7 +3,7 @@ Credit rating actions from NSE corporate disclosures.
 
 Under SEBI LODR, listed companies (and debt-listed issuers) must disclose
 every credit rating action to the exchange. NSE exposes these at
-/api/corporate-credit-rating — agency, rating, action (Upgrade/Downgrade/
+/api/corporate-credit-rating - agency, rating, action (Upgrade/Downgrade/
 Withdrawn/...), and date. This is the authoritative replacement for the
 thin RATING_AGENCY fields on BSE's debt-search API.
 
@@ -66,7 +66,7 @@ async def _warmup(client: httpx.AsyncClient) -> None:
 
 
 def _name_variants(name: str) -> list[str]:
-    """NSE issuer match is exact — generate likely spellings."""
+    """NSE issuer match is exact - generate likely spellings."""
     n = " ".join(name.split()).strip()
     # Drop "(Formerly: ...)" suffixes from RBI registry names
     n = re.sub(r"\s*\((Formerly|Earlier)[^)]*\)\s*", " ", n, flags=re.I).strip()
@@ -188,9 +188,9 @@ async def fetch_announcement_ratings(symbol: str, company_name: str) -> list[dic
 async def fetch_rating_actions(company_name: str, symbol: str = "") -> tuple[list[dict], str]:
     """
     Returns (actions, status).
-    status: "ok"        — NSE answered, actions found
-            "none"      — NSE answered, no disclosures matched this name
-            "blocked"   — NSE unreachable / blocking us (data NOT verified)
+    status: "ok"        - NSE answered, actions found
+            "none"      - NSE answered, no disclosures matched this name
+            "blocked"   - NSE unreachable / blocking us (data NOT verified)
     Actions sorted newest first. Combines the structured credit-rating feed
     (issuer exact match) with rating actions mined from the company's
     'Credit Rating' announcements (by NSE symbol, for listed companies).

@@ -1,12 +1,12 @@
 """
-LEAD QUEUE — the ranked list the dashboard renders.
+LEAD QUEUE - the ranked list the dashboard renders.
 
 One batch pass, not a per-company fan-out: `cra_press.fetch_recent_actions`
 returns every recent rating action in a couple of HTTP calls, we group those by
 issuer, and score each issuer with `winnability.score`. No network per lead, so
 the whole queue costs the same as one page fetch.
 
-WHAT THIS QUEUE CAN AND CANNOT SEE — read before trusting a number:
+WHAT THIS QUEUE CAN AND CANNOT SEE - read before trusting a number:
 
   * Three agencies carry a recent-actions feed and are read here: ACUITE,
     BRICKWORK and INDRA. CARE has no feed but answers per-company lookups, so it
@@ -16,7 +16,7 @@ WHAT THIS QUEUE CAN AND CANNOT SEE — read before trusting a number:
     reaches this queue by having a published rating action, so a genuinely
     unrated first-time issuer is by definition absent. First-timers have to come
     from a registry-minus-rated-universe join once the MCA master lands
-    (ROADMAP_V3 phase 4) — not from here.
+    (ROADMAP_V3 phase 4) - not from here.
   * **`multi_cra` cannot be seen in the feeds either.** Measured on live data,
     cross-feed overlap was exactly zero: each agency publishes about a different
     set of companies, so two feeds practically never name the same issuer in the
@@ -71,7 +71,7 @@ def _latest(actions: list[dict]) -> dict:
 
 
 def build_rows(actions: list[dict]) -> list[dict]:
-    """Group actions by issuer and score each one. Pure — no I/O, so this is
+    """Group actions by issuer and score each one. Pure - no I/O, so this is
     what the self-check exercises."""
     grouped: dict[str, list[dict]] = {}
     for act in actions:
@@ -106,15 +106,15 @@ def build_rows(actions: list[dict]) -> list[dict]:
 async def _enrich_coverage(rows: list[dict], limit: int) -> int:
     """Ask CARE what it rates, for the top `limit` candidates, and rescore them.
 
-    WHY THIS EXISTS: `multi_cra` — already rated by two or more agencies, our
-    single best "will take a third quote" signal — is undetectable from the
+    WHY THIS EXISTS: `multi_cra` - already rated by two or more agencies, our
+    single best "will take a third quote" signal - is undetectable from the
     recent-action feeds. Each agency's feed lists different companies, so two
     feeds almost never name the same issuer in the same window; measured on live
     data, cross-feed overlap was exactly zero. Coverage is a per-company
     question and has to be asked per company.
 
     Only the top slice is enriched, because this is the one place in the queue
-    that costs network per lead. Blocked rows are skipped — they are not
+    that costs network per lead. Blocked rows are skipped - they are not
     callable whatever their coverage turns out to be.
 
     Returns how many rows were actually enriched, so `coverage` can say so.
@@ -142,7 +142,7 @@ async def _enrich_coverage(rows: list[dict], limit: int) -> int:
 
 
 async def build_queue(days: int = 30, enrich: int = 15) -> dict:
-    """The ranked queue. Never raises on a source failure — it degrades and says
+    """The ranked queue. Never raises on a source failure - it degrades and says
     so in `coverage`."""
     # No cache here on purpose: cra_press already TTL-caches the fetch, and
     # regrouping ~120 rows costs microseconds. A second layer would only add a

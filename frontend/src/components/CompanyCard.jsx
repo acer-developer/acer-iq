@@ -60,10 +60,10 @@ function InfoRow({ label, value, href }) {
       {href ? (
         <a href={href} target="_blank" rel="noreferrer"
           className="truncate text-blue-600 hover:text-blue-700 hover:underline">
-          {value || "—"}
+          {value || "-"}
         </a>
       ) : (
-        <span className="text-gray-800">{value || "—"}</span>
+        <span className="text-gray-800">{value || "-"}</span>
       )}
     </div>
   );
@@ -113,7 +113,7 @@ function PastInstrumentsTable({ instruments }) {
             <tr key={i} className="hover:bg-gray-50">
               <td className="px-2.5 py-2 max-w-[120px]">
                 <div className="truncate font-medium text-gray-800" title={inst.security_name}>
-                  {inst.security_name || "—"}
+                  {inst.security_name || "-"}
                 </div>
                 {inst.isin && (
                   <div className="font-mono text-[10px] text-gray-400">{inst.isin}</div>
@@ -123,16 +123,16 @@ function PastInstrumentsTable({ instruments }) {
                 <InstrumentTypeBadge type={inst.instrument_type} />
               </td>
               <td className="px-2.5 py-2 text-gray-700">
-                {inst.coupon_rate ? `${inst.coupon_rate}%` : "—"}
+                {inst.coupon_rate ? `${inst.coupon_rate}%` : "-"}
               </td>
               <td className="px-2.5 py-2 text-gray-500">
-                {inst.maturity_date || "—"}
+                {inst.maturity_date || "-"}
               </td>
               <td className="px-2.5 py-2">
                 {inst.credit_rating ? (
                   <span className="font-bold text-amber-600">{inst.credit_rating}</span>
                 ) : (
-                  <span className="text-gray-300">—</span>
+                  <span className="text-gray-300">-</span>
                 )}
                 {inst.rating_agency && (
                   <div className="text-[10px] text-gray-400">{inst.rating_agency}</div>
@@ -144,7 +144,7 @@ function PastInstrumentsTable({ instruments }) {
                   inst.status?.toLowerCase().includes("redeem") ? "text-gray-400" :
                   "text-gray-500"
                 }`}>
-                  {inst.status || "—"}
+                  {inst.status || "-"}
                 </span>
               </td>
             </tr>
@@ -280,11 +280,11 @@ export default function CompanyCard({ company, onClose }) {
               value={
                 company.cin ||
                 (company.sub_type?.includes("UCB") || company.sub_type?.includes("Co-operative")
-                  ? "N/A — co-operative society (no CIN)"
+                  ? "N/A - co-operative society (no CIN)"
                   : "Not found")
               }
             />
-            <InfoRow label="Incorporated" value={company.incorporation_date || "—"} />
+            <InfoRow label="Incorporated" value={company.incorporation_date || "-"} />
           </div>
         </Section>
 

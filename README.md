@@ -1,4 +1,4 @@
-# LeadRadar — B2B Lead Generation for Credit Rating Agencies
+# LeadRadar - B2B Lead Generation for Credit Rating Agencies
 
 Find, score, and enrich company leads across Indian cities using Google Places, Hunter.io, Zauba Corp, and Claude AI.
 
@@ -22,7 +22,7 @@ SUPABASE_URL=your_url_here
 SUPABASE_KEY=your_key_here
 ```
 
-> **Note:** The app works without API keys — it falls back to mock data so you can test the UI immediately.
+> **Note:** The app works without API keys - it falls back to mock data so you can test the UI immediately.
 
 ### 3. Install Python dependencies
 ```bash
@@ -72,7 +72,7 @@ Add `VITE_GOOGLE_MAPS_API_KEY=your_key` to `frontend/.env` for the map to render
 
 ---
 
-## Supabase Setup (Optional — for persistent search history)
+## Supabase Setup (Optional - for persistent search history)
 
 Run this SQL in the Supabase SQL editor to create the searches table:
 
@@ -92,19 +92,19 @@ create table searches (
 
 **Prerequisites:** [Railway CLI](https://docs.railway.app/develop/cli) or use the web dashboard.
 
-### Step 1 — Push your code to GitHub
+### Step 1 - Push your code to GitHub
 ```bash
 git init && git add . && git commit -m "Initial commit"
 git remote add origin <your-github-repo>
 git push -u origin main
 ```
 
-### Step 2 — Create Railway project
+### Step 2 - Create Railway project
 1. Go to [railway.app](https://railway.app) → New Project → Deploy from GitHub Repo
 2. Select your repository
 3. Railway auto-detects `railway.toml` and `Procfile`
 
-### Step 3 — Add environment variables
+### Step 3 - Add environment variables
 In Railway dashboard → your service → Variables, add all keys from your `.env` file.
 
 Railway will build and deploy automatically. Your app will be live at `https://your-app.up.railway.app` within ~3 minutes.

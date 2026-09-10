@@ -22,7 +22,7 @@ const TILES = {
       // Satellite base
       {
         url:  "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
-        attr: "Tiles &copy; Esri — Source: Esri, USGS, NOAA",
+        attr: "Tiles &copy; Esri - Source: Esri, USGS, NOAA",
         maxNativeZoom: 19,
         maxZoom: 22,
       },
@@ -41,7 +41,7 @@ const TILES = {
     layers: [
       {
         url:  "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
-        attr: "Tiles &copy; Esri — Source: Esri, USGS, NOAA",
+        attr: "Tiles &copy; Esri - Source: Esri, USGS, NOAA",
         maxNativeZoom: 19,
         maxZoom: 22,
       },
@@ -92,7 +92,7 @@ function FlyController({ lat, lng }) {
       map.invalidateSize();
       const size = map.getSize();
       if (!size.x || !size.y) {
-        // Container not laid out yet — flyTo would compute NaN and crash
+        // Container not laid out yet - flyTo would compute NaN and crash
         map.setView([lat, lng], 12, { animate: false });
       } else {
         map.flyTo([lat, lng], 12, { animate: true, duration: 1.2 });
@@ -117,7 +117,7 @@ export default function MapView({
   return (
     <div style={{ position: "relative", height: "100%", width: "100%" }}>
 
-      {/* ── Tile-mode toggle — top-right, above map ── */}
+      {/* ── Tile-mode toggle - top-right, above map ── */}
       <div style={{
         position: "absolute", top: 12, right: 12, zIndex: 1000,
         display: "flex", gap: 4,
@@ -156,7 +156,7 @@ export default function MapView({
         zoomControl={false}          // we add our own below, positioned bottom-right
         style={{ height: "100%", width: "100%" }}
       >
-        {/* Zoom controls — bottom-right, clearly visible over satellite */}
+        {/* Zoom controls - bottom-right, clearly visible over satellite */}
         <ZoomControl position="bottomright" />
 
         {/* Render tile layers for active mode */}
@@ -177,7 +177,7 @@ export default function MapView({
           <FlyController lat={cityLat} lng={cityLng} />
         )}
 
-        {/* Company pins — skip any without valid coordinates */}
+        {/* Company pins - skip any without valid coordinates */}
         {companies.filter((c) => Number.isFinite(c.lat) && Number.isFinite(c.lng)).map((company) => {
           const color      = ENTITY_COLORS[company.entity_type] ?? ENTITY_COLORS["Financial Entity"];
           const isSelected = company.id === selectedId;

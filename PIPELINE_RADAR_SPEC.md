@@ -1,6 +1,6 @@
-# Pipeline Radar — Module Spec
+# Pipeline Radar - Module Spec
 
-> Third tab in the web app: **"Pipeline Radar"** — companies expected to raise
+> Third tab in the web app: **"Pipeline Radar"** - companies expected to raise
 > money in the coming month/quarters, caught BEFORE they mandate a rating agency.
 > This is the module a CRA CEO would check every Monday morning.
 > Created 2026-06-10. Status: SPEC APPROVED FOR BUILD (pending sequencing call).
@@ -23,12 +23,12 @@ No naked scores. If we can't show evidence, we don't show the lead.
 
 ## 2. Time horizon system (Indian FY, auto-rolling)
 
-India fiscal year = April–March. FY27 = Apr 2026 – Mar 2027.
+India fiscal year = April-March. FY27 = Apr 2026 - Mar 2027.
 
 - All signals are stored with **absolute date windows** (`expected_from`,
   `expected_to`), never labels.
 - Labels (FY-quarter chips) are **computed at request time** from today's date,
-  so buckets roll forward automatically — a lead in "coming quarter" today
+  so buckets roll forward automatically - a lead in "coming quarter" today
   becomes "this month" as time passes, with zero data migration.
 
 Horizon chips (computed for today = 10 Jun 2026):
@@ -37,9 +37,9 @@ Horizon chips (computed for today = 10 Jun 2026):
 |------|--------|
 | This month | Jun 2026 |
 | Rest of FY27 Q1 | until 30 Jun 2026 |
-| FY27 Q2 | Jul–Sep 2026 |
-| FY27 Q3 | Oct–Dec 2026 |
-| FY27 Q4 | Jan–Mar 2027 |
+| FY27 Q2 | Jul-Sep 2026 |
+| FY27 Q3 | Oct-Dec 2026 |
+| FY27 Q4 | Jan-Mar 2027 |
 | FY28 H1+ | Apr 2027 onwards |
 
 Signals whose window has fully passed → auto-archived (status `expired`),
@@ -53,12 +53,12 @@ visible in a history view for hit-rate review ("did they actually raise?").
 
 | # | Signal | Expected window rule | Confidence | Source |
 |---|--------|---------------------|------------|--------|
-| S1 | Board meeting intimation: "to consider fund raising / NCD / QIP / rights issue" | meeting date + 0–2 months | High | BSE/NSE corporate announcements (structured API) |
-| S2 | Outcome/special resolution: borrowing limit increase Sec 180(1)(c), NCD private-placement approval | approval date + 0–12 months (front-loaded) | High | BSE/NSE outcomes |
+| S1 | Board meeting intimation: "to consider fund raising / NCD / QIP / rights issue" | meeting date + 0-2 months | High | BSE/NSE corporate announcements (structured API) |
+| S2 | Outcome/special resolution: borrowing limit increase Sec 180(1)(c), NCD private-placement approval | approval date + 0-12 months (front-loaded) | High | BSE/NSE outcomes |
 | S3 | Maturing NCDs/bonds | maturity date − 6 to − 1 months (refinance window) | High (date is certain) | BSE debt data we already fetch (`maturity_date`) |
-| S4 | Shelf prospectus / DRHP filed | filing + 1–2 quarters | High | SEBI filings page |
-| S5 | Expansion news: capex, new plant, acquisition, large order win, PLI winner, infra/renewable project award | article date + 2–4 quarters | Medium | Google News RSS / sector feeds → LLM classification |
-| S6 | New NBFC licence granted | grant + 1–2 quarters (first-time rating) | Medium | RBI press releases |
+| S4 | Shelf prospectus / DRHP filed | filing + 1-2 quarters | High | SEBI filings page |
+| S5 | Expansion news: capex, new plant, acquisition, large order win, PLI winner, infra/renewable project award | article date + 2-4 quarters | Medium | Google News RSS / sector feeds → LLM classification |
+| S6 | New NBFC licence granted | grant + 1-2 quarters (first-time rating) | Medium | RBI press releases |
 | S7 | Competitor rating withdrawn / INC | immediate | High | Agency press-release pages |
 
 Build order within signals: **S1+S2 first** (one structured source, highest value),
@@ -68,7 +68,7 @@ then S3 (data we already have), then S5 (news + LLM), then S4/S6/S7.
 (company, instrument, amount if stated, window, one-line reason) → attach
 `source_url` + verbatim evidence snippet → upsert into `signals`.
 
-LLM never invents the window — rules above set it; LLM only classifies type and
+LLM never invents the window - rules above set it; LLM only classifies type and
 extracts fields. Anything the LLM can't ground in the source text gets dropped.
 
 ---
@@ -80,7 +80,7 @@ Weekly background job:
 1. Aggregate live signals by sector → counts, total announced amounts.
 2. Pull sector headlines (news RSS) for context.
 3. LLM writes per-sector outlook: stance (Bullish / Neutral / Cautious),
-   3–4 driver bullets, **each driver linked to a source URL**, expected
+   3-4 driver bullets, **each driver linked to a source URL**, expected
    instrument mix, top upcoming issuers.
 4. Stored in `sector_outlook` with `generated_at`; UI shows freshness stamp.
 
@@ -169,8 +169,8 @@ sector_outlook (
 | `GET /api/radar/company/{cin_or_id}` | full drill-down profile |
 | `POST /api/radar/refresh` (admin/cron) | run signal ingestion now |
 
-Ingestion runs as scheduled jobs (daily signals, weekly sector outlook) — cron
-on the host or Supabase scheduled functions — never inside a user request.
+Ingestion runs as scheduled jobs (daily signals, weekly sector outlook) - cron
+on the host or Supabase scheduled functions - never inside a user request.
 
 ---
 
@@ -187,7 +187,7 @@ on the host or Supabase scheduled functions — never inside a user request.
 | 6 | S5 news/capex signals (Google News RSS + LLM) | 4 |
 | 7 | S4 SEBI filings, S6 RBI licences, S7 competitor withdrawals/INC | 6 |
 
-Definition of done for v1 = steps 0–5: a working tab where you pick "FY27 Q2",
+Definition of done for v1 = steps 0-5: a working tab where you pick "FY27 Q2",
 see sector cards, see evidence-backed leads from real BSE announcements and
 maturity data, and click into a full company profile.
 
@@ -195,11 +195,11 @@ maturity data, and click into a full company profile.
 
 ## 9. Honest constraints (so we plan around them)
 
-- **Listed companies first.** S1–S4 cover BSE/NSE-listed issuers. Unlisted
-  companies need MCA MGT-14/charge filings (paid/awkward API) — phase it later.
-- **NSE announcement API is more aggressive about blocking than BSE** — start
+- **Listed companies first.** S1-S4 cover BSE/NSE-listed issuers. Unlisted
+  companies need MCA MGT-14/charge filings (paid/awkward API) - phase it later.
+- **NSE announcement API is more aggressive about blocking than BSE** - start
   with BSE, add NSE with careful headers/caching.
-- **News signals (S5) are noisy** — they launch *after* the structured signals
+- **News signals (S5) are noisy** - they launch *after* the structured signals
   prove the UX, and always show as "Medium confidence".
-- **Free OpenRouter LLM is rate-limited** — classification must be batched and
+- **Free OpenRouter LLM is rate-limited** - classification must be batched and
   cached by document hash; one document is never classified twice.

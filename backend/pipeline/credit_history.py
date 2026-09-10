@@ -70,15 +70,15 @@ def _latest_rating(instruments: list[dict]) -> str:
         r = inst.get("rating", "")
         if r:
             return r
-    return "—"
+    return "-"
 
 
 async def fetch_credit_history(company_name: str, cin: str = "", symbol: str = "") -> dict:
     """
     Build the 7-agency rating matrix from two sources:
-      1. NSE corporate disclosures (SEBI-mandated rating-action filings) —
+      1. NSE corporate disclosures (SEBI-mandated rating-action filings) -
          primary; real agency names, ratings, actions, dates.
-      2. BSE debt-search instruments — secondary, merged when reachable.
+      2. BSE debt-search instruments - secondary, merged when reachable.
 
     Returns data_status so the UI can distinguish "verified: not rated"
     from "sources unreachable: unknown".

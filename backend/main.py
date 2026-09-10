@@ -98,7 +98,7 @@ def _llm_configured() -> bool:
 
 
 def _source_status(total: int) -> list[dict]:
-    """What each data source did on this request — surfaced in the response so
+    """What each data source did on this request - surfaced in the response so
     the UI can badge a degraded source instead of implying an empty truth."""
     from backend.pipeline.bse_scraper import _bse_tripped
 
@@ -106,10 +106,10 @@ def _source_status(total: int) -> list[dict]:
     # merges the several internal labels that mean "BSE" into one badge.
     status: dict[str, str] = {
         "RBI/NSE registry": "" if registry_store.available()
-                            else "registry.sqlite missing — run the ingest CLI",
-        "BSE": "circuit breaker open — BSE unreachable or blocking" if _bse_tripped() else "",
+                            else "registry.sqlite missing - run the ingest CLI",
+        "BSE": "circuit breaker open - BSE unreachable or blocking" if _bse_tripped() else "",
         "AI scoring": "" if _llm_configured()
-                      else "no LLM key configured — rule-based scores only",
+                      else "no LLM key configured - rule-based scores only",
     }
     for label, n in (_failures.get() or Counter()).items():
         name = _SOURCE_NAMES.get(label, label)
@@ -127,7 +127,7 @@ async def search_leads(req: SearchRequest):
     _failures.set(Counter())
     entity_type = req.entity_type or "All"
     instrument_type = req.instrument_type or "All"
-    industry = req.industry or f"{entity_type} — {instrument_type}"
+    industry = req.industry or f"{entity_type} - {instrument_type}"
 
     raw_companies, city_lat, city_lng = await discover_companies(
         req.city, industry, entity_type, instrument_type, size=req.size or "All"
@@ -141,7 +141,7 @@ async def search_leads(req: SearchRequest):
             search_id=str(uuid.uuid4()), sources=_source_status(0),
         )
 
-    # Enrich contacts — safe, returns companies with empty contacts on failure
+    # Enrich contacts - safe, returns companies with empty contacts on failure
     try:
         raw_companies = await enrich_contacts(raw_companies)
     except Exception:
@@ -159,7 +159,7 @@ async def search_leads(req: SearchRequest):
             sub = c.get("registry_sub_type", "")
             is_coop = sub in ("Co-operative Bank", "Scheduled UCB")
 
-            # MCA data — skipped when we already know the CIN (registry NBFCs:
+            # MCA data - skipped when we already know the CIN (registry NBFCs:
             # incorporation year is encoded in the CIN itself) and for co-op
             # banks (cooperative societies, not MCA companies at all).
             # Directors load on click via Company Research.
@@ -190,7 +190,7 @@ async def search_leads(req: SearchRequest):
                     })
                 c["contacts"] = contacts
 
-            # BSE instruments — non-scheduled co-op banks never list debt on
+            # BSE instruments - non-scheduled co-op banks never list debt on
             # BSE; skip 4 wasted searches each
             if sub == "Co-operative Bank":
                 c["past_instruments"] = []
@@ -212,7 +212,7 @@ async def search_leads(req: SearchRequest):
             c.setdefault("recommended_approach", "")
 
             # Office locations: fetched on demand via /api/offices when a lead
-            # is selected — not in bulk (60 Google calls per search)
+            # is selected - not in bulk (60 Google calls per search)
             c["office_locations"] = []
 
             return c
@@ -290,7 +290,7 @@ async def get_queue(days: int = 30, enrich: int = 15):
     if days < 1 or days > 365:
         raise HTTPException(status_code=400, detail="days must be between 1 and 365")
     # Each enriched lead costs two CARE calls, so the depth is capped rather
-    # than left to the caller — an unbounded value would let one request
+    # than left to the caller - an unbounded value would let one request
     # hammer CARE and stall the page.
     enrich = max(0, min(enrich, 40))
 
@@ -299,7 +299,7 @@ async def get_queue(days: int = 30, enrich: int = 15):
              "window_days": days,
              "coverage": {"sources": {}, "agencies_read": [], "agencies_total": 0,
                           "data_status": "unverified",
-                          "note": "Queue could not be built — no CRA source answered."}}
+                          "note": "Queue could not be built - no CRA source answered."}}
     data = await _safe(build_queue(days=days, enrich=enrich), empty, "cra_press")
     return {**data, "sources": _source_status(1)}
 
@@ -374,7 +374,7 @@ async def company_suggest(q: str = ""):
     seen = {s["name"].lower() for s in suggestions}
 
     # Supplement with BSE-listed companies (covers corporates outside RBI lists).
-    # Served from the cached BSE scrip master — no per-keystroke network call.
+    # Served from the cached BSE scrip master - no per-keystroke network call.
     from backend.pipeline.bse_scraper import search_bse_companies
     for item in await _safe(search_bse_companies(q.strip(), limit=10), [], "bse_suggest"):
         if item["name"].lower() in seen:
@@ -405,17 +405,17 @@ async def company_credit(req: CompanyCreditRequest):
     # Detect CIN pattern (starts with L or U followed by digits and letters)
     is_cin = len(query) == 21 and query[0].upper() in ("L", "U")
 
-    # 1) RBI registry — authoritative for NBFCs / co-op banks / SFBs / ARCs
+    # 1) RBI registry - authoritative for NBFCs / co-op banks / SFBs / ARCs
     reg = registry_store.get_by_name(query)
 
     # Every downstream lookup (BSE, Zauba, NSE) is a *name* search. Feeding it a
-    # CIN returns nothing, which the UI would render as "not rated by anyone" —
+    # CIN returns nothing, which the UI would render as "not rated by anyone" -
     # a false negative on the one screen the sales team trusts. Fail loudly.
     if is_cin and not reg:
         raise HTTPException(
             status_code=404,
             detail=f"CIN {query} is not in the registry. Search by company name "
-                   f"instead — CIN-to-name resolution needs MCA data, which we "
+                   f"instead - CIN-to-name resolution needs MCA data, which we "
                    f"do not have a free source for yet.",
         )
 
@@ -437,7 +437,7 @@ async def company_credit(req: CompanyCreditRequest):
         if year.isdigit():
             company_info["incorporation_date"] = year
 
-    # 2) BSE/Zauba — listing data, directors, registered address
+    # 2) BSE/Zauba - listing data, directors, registered address
     mca = await _safe(fetch_mca_data(company_info["name"]), {}, "mca")
     if mca.get("cin") and not company_info["cin"]:
         company_info["cin"] = mca["cin"]
@@ -473,7 +473,7 @@ async def company_credit(req: CompanyCreditRequest):
         "already_rated_by_infomerics": False,
     }, "fit_analysis")
 
-    # Winnability — can we realistically win this, not merely does it need a
+    # Winnability - can we realistically win this, not merely does it need a
     # rating (ROADMAP_V3 lever 3). Pure function over credit_data, no I/O, so it
     # cannot fail the request; it stays outside _safe deliberately.
     win = winnability_scorer.score(company_info, credit_data)
@@ -500,7 +500,7 @@ def _guess_entity_type(name: str) -> str:
 
 @app.get("/api/directors/{company_name}")
 async def get_directors(company_name: str):
-    """Board of directors for a selected lead — BSE CorpInfo for listed
+    """Board of directors for a selected lead - BSE CorpInfo for listed
     companies, Zauba for private ones. Cached + circuit-breaker protected."""
     mca = await _safe(fetch_mca_data(company_name), {}, "mca")
     return {
@@ -583,7 +583,7 @@ async def export_csv(search_id: str):
 
 @app.get("/api/health")
 async def health():
-    """Liveness for uptime checks — kept off "/" so the root can serve the UI."""
+    """Liveness for uptime checks - kept off "/" so the root can serve the UI."""
     return {
         "status": "ok",
         "version": app.version,
@@ -597,7 +597,7 @@ _FRONTEND_DIST = Path(__file__).parent.parent / "frontend" / "dist"
 if _FRONTEND_DIST.exists():
     app.mount("/", StaticFiles(directory=str(_FRONTEND_DIST), html=True), name="static")
 else:
-    log.info("no frontend/dist here — redirecting browsers to %s",
+    log.info("no frontend/dist here - redirecting browsers to %s",
              settings.frontend_url)
 
     @app.get("/", include_in_schema=False)

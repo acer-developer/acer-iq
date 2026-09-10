@@ -64,7 +64,7 @@ def _label(score: int) -> str:
 
 def _data_driven_analysis(company: dict, credit_data: dict) -> dict:
     """
-    Build a meaningful fit analysis entirely from real BSE data —
+    Build a meaningful fit analysis entirely from real BSE data -
     no LLM needed. Uses actual agency coverage, instrument count, and
     entity type to generate specific insights.
     """
@@ -86,28 +86,28 @@ def _data_driven_analysis(company: dict, credit_data: dict) -> dict:
     # ── Score logic ───────────────────────────────────────────────────────────
     if acer_is_rating:
         score = 88
-        opportunity = f"Existing ACER client — {acer_agency.get('total_instruments', 0)} active instruments"
+        opportunity = f"Existing ACER client - {acer_agency.get('total_instruments', 0)} active instruments"
         urgency = "High"
         insights = [
-            f"Already rated by Infomerics/ACER with {acer_agency.get('total_instruments',0)} instrument(s) — renewal and upsell opportunity",
-            f"Total {total} instruments across BSE — active debt issuer with ongoing rating needs",
-            "Relationship already established — lowest-effort high-value account to grow",
+            f"Already rated by Infomerics/ACER with {acer_agency.get('total_instruments',0)} instrument(s) - renewal and upsell opportunity",
+            f"Total {total} instruments across BSE - active debt issuer with ongoing rating needs",
+            "Relationship already established - lowest-effort high-value account to grow",
         ]
         watch_outs = [
             "Ensure renewal pipeline is tracked and no mandate is lost to a competitor",
-            f"{rated_by} agencies total — monitor if any competitor is being added or displacing ACER",
+            f"{rated_by} agencies total - monitor if any competitor is being added or displacing ACER",
         ]
         best_pitch = "Renewal + additional instruments"
 
     elif rated_by == 0 and total == 0 and credit_data.get("data_status") == "unverified":
-        # Sources unreachable — absence of data proves NOTHING. Say so.
+        # Sources unreachable - absence of data proves NOTHING. Say so.
         score = 50
-        opportunity = "Rating history could not be verified — data sources unreachable"
+        opportunity = "Rating history could not be verified - data sources unreachable"
         urgency = "Medium"
         insights = [
-            f"NSE/BSE disclosure sources were unreachable, so {name}'s rating coverage is UNKNOWN — not necessarily unrated",
+            f"NSE/BSE disclosure sources were unreachable, so {name}'s rating coverage is UNKNOWN - not necessarily unrated",
             "Use the per-agency 'Search' links in the table to verify coverage manually before any outreach",
-            f"{entity} profile from the RBI registry is verified — only the rating history is missing",
+            f"{entity} profile from the RBI registry is verified - only the rating history is missing",
         ]
         watch_outs = [
             "Do NOT pitch this as a first-time mandate until coverage is manually verified",
@@ -117,75 +117,75 @@ def _data_driven_analysis(company: dict, credit_data: dict) -> dict:
 
     elif rated_by == 0 and total == 0:
         score = 82
-        opportunity = "Possible first-time mandate — no exchange-disclosed rating actions found under this name"
+        opportunity = "Possible first-time mandate - no exchange-disclosed rating actions found under this name"
         urgency = "High"
         insights = [
-            f"No NSE rating-action disclosures or BSE-listed rated instruments matched {name} — likely unrated or privately rated",
+            f"No NSE rating-action disclosures or BSE-listed rated instruments matched {name} - likely unrated or privately rated",
             f"{entity} entities at this scale are increasingly moving to rated debt to reduce borrowing costs",
-            "No competitive displacement required — ACER can build the entire rating relationship from scratch",
+            "No competitive displacement required - ACER can build the entire rating relationship from scratch",
         ]
         watch_outs = [
-            "Exchange disclosures match exact names — a different legal spelling could hide existing ratings; spot-check one agency manually",
+            "Exchange disclosures match exact names - a different legal spelling could hide existing ratings; spot-check one agency manually",
             "Verify company is actually seeking debt financing before investing sales effort",
         ]
         best_pitch = "NCD" if entity in ("NBFC", "Corporate") else "Bond"
 
     elif rated_by == 0 and total > 0:
         score = 78
-        opportunity = f"{total} instruments on BSE but no agency coverage matched — possible data gap or private ratings"
+        opportunity = f"{total} instruments on BSE but no agency coverage matched - possible data gap or private ratings"
         urgency = "High"
         insights = [
-            f"{total} debt instruments found on BSE with no matching SEBI-registered agency — strong mandate gap",
+            f"{total} debt instruments found on BSE with no matching SEBI-registered agency - strong mandate gap",
             "ACER can be the first formal credit rating agency for this issuer",
-            "Active debt program confirmed — company is already comfortable with capital markets",
+            "Active debt program confirmed - company is already comfortable with capital markets",
         ]
         watch_outs = [
             "Cross-check if ratings exist from agencies not tracked on BSE",
-            "Instruments may be privately placed and already rated — verify before outreach",
+            "Instruments may be privately placed and already rated - verify before outreach",
         ]
         best_pitch = "NCD" if entity in ("NBFC", "Corporate") else "Bond"
 
     elif rated_by <= 2:
         score = 70
         comps = ", ".join(active_agencies[:2]) if active_agencies else "existing agencies"
-        opportunity = f"Secondary mandate — rated by {rated_by} of 7 agencies, whitespace for ACER"
+        opportunity = f"Secondary mandate - rated by {rated_by} of 7 agencies, whitespace for ACER"
         urgency = "Medium"
         insights = [
-            f"Rated by only {rated_by} of 7 SEBI-registered agencies — significant coverage gap ACER can fill",
-            f"Active issuer with {total} instruments — proven willingness to pay for ratings",
-            f"Currently with {comps} — ACER can offer a competitive parallel or second opinion rating",
+            f"Rated by only {rated_by} of 7 SEBI-registered agencies - significant coverage gap ACER can fill",
+            f"Active issuer with {total} instruments - proven willingness to pay for ratings",
+            f"Currently with {comps} - ACER can offer a competitive parallel or second opinion rating",
         ]
         watch_outs = [
-            f"Existing relationship with {comps} — needs a strong value proposition to add ACER",
-            "Multi-agency rating adds cost — pitch the investor diversification and pricing benefit",
+            f"Existing relationship with {comps} - needs a strong value proposition to add ACER",
+            "Multi-agency rating adds cost - pitch the investor diversification and pricing benefit",
         ]
         best_pitch = "NCD" if entity in ("NBFC", "Corporate") else "Bond"
 
     else:
         score = 52
         comps = ", ".join(active_agencies[:3]) if active_agencies else "multiple agencies"
-        opportunity = f"Competitive entry — already rated by {rated_by} of 7 agencies"
+        opportunity = f"Competitive entry - already rated by {rated_by} of 7 agencies"
         urgency = "Low"
         insights = [
             f"Broad coverage by {rated_by} agencies including {comps}",
             "Possible angle: pitch ACER for new instruments not yet rated by others",
-            "Long-term relationship approach recommended — attend their investor/lender meets",
+            "Long-term relationship approach recommended - attend their investor/lender meets",
         ]
         watch_outs = [
-            f"Already well-covered by {rated_by} agencies — pricing and TAT must be compelling",
-            "Risk of over-pitched company — sales approach must be highly differentiated",
+            f"Already well-covered by {rated_by} agencies - pricing and TAT must be compelling",
+            "Risk of over-pitched company - sales approach must be highly differentiated",
         ]
         best_pitch = "New instrument" if entity in ("NBFC", "Corporate") else "Subordinated Bond"
 
     # ── Recommended action ────────────────────────────────────────────────────
     if acer_is_rating:
-        action = f"Schedule quarterly review with {name}'s CFO/Treasury team — track upcoming instrument maturities and new fundraising plans"
+        action = f"Schedule quarterly review with {name}'s CFO/Treasury team - track upcoming instrument maturities and new fundraising plans"
     elif rated_by == 0:
-        action = f"Reach out to {name}'s CFO with ACER's first-time issuer package — highlight RBI/SEBI mandate benefits and cost savings vs bank debt"
+        action = f"Reach out to {name}'s CFO with ACER's first-time issuer package - highlight RBI/SEBI mandate benefits and cost savings vs bank debt"
     elif rated_by <= 2:
-        action = f"Approach {name}'s treasury team with a competitive proposal — offer parallel rating with faster TAT than their existing agency"
+        action = f"Approach {name}'s treasury team with a competitive proposal - offer parallel rating with faster TAT than their existing agency"
     else:
-        action = f"Place {name} on a 6-month watch list — approach when a new instrument is announced or existing ratings are up for renewal"
+        action = f"Place {name} on a 6-month watch list - approach when a new instrument is announced or existing ratings are up for renewal"
 
     return {
         "fit_score":                  score,
@@ -218,7 +218,7 @@ async def analyze_fit(company: dict, credit_data: dict) -> dict:
     actions = credit_data.get("rating_actions", [])[:8]
     if actions:
         action_lines = "\n".join(
-            f"  - {a['date']}: {a['agency']} — {a['rating']} ({a['action']})"
+            f"  - {a['date']}: {a['agency']} - {a['rating']} ({a['action']})"
             for a in actions
         )
         rating_summary += f"\n\nRecent rating actions (NSE disclosures, newest first):\n{action_lines}"

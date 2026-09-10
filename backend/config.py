@@ -4,7 +4,7 @@ from pydantic_settings import BaseSettings
 class Settings(BaseSettings):
     google_places_api_key: str = ""
     hunter_api_key: str = ""
-    openrouter_api_key: str = ""  # primary LLM — free models available
+    openrouter_api_key: str = ""  # primary LLM - free models available
     # Fallback LLM. Any OpenAI-compatible endpoint works; used when OpenRouter
     # has no key or its free tier is rate-limited.
     tokenrouter_api_key: str = ""
@@ -25,7 +25,7 @@ class Settings(BaseSettings):
         env_file = ".env"
         case_sensitive = False
         # Retired keys (ANTHROPIC_API_KEY, GOOGLE_MAPS_API_KEY) are still set in
-        # Render/.env — without this the app refuses to boot on unknown env vars.
+        # Render/.env - without this the app refuses to boot on unknown env vars.
         extra = "ignore"
 
 

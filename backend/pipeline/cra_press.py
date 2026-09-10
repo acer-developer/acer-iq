@@ -1,9 +1,9 @@
 """
-CRA PRESS — recent rating actions scraped directly off the 7 agencies' own
+CRA PRESS - recent rating actions scraped directly off the 7 agencies' own
 sites, not from an exchange.
 
 NSE/BSE disclosures (nse_ratings.py, bse_scraper.py) only ever cover listed
-issuers. The bulk of India's rated universe is unlisted bank-loan borrowers —
+issuers. The bulk of India's rated universe is unlisted bank-loan borrowers -
 a private company with a CC/OD facility never files an NSE/BSE disclosure,
 so the only place its rating ever surfaces is the CRA's own press-release
 page. This module is that second leg.
@@ -12,14 +12,14 @@ Reality check after actually probing all 7 live sites (Sep 2026), no
 headless browser, plain httpx only:
 
   ACUITE      WORKS   connect.acuite.in/liveratings is a plain server-
-                      rendered HTML table — date, company, per-instrument
+                      rendered HTML table - date, company, per-instrument
                       rating and action, no JS needed.
   BRICKWORK   WORKS   the public homepage carries a "Rating Rationales"
                       feed with per-instrument rating + company + status
                       baked into each link's text/href. Its dedicated
                       PressRelease.aspx search page is a classic ASP.NET
                       WebForms postback grid behind __VIEWSTATE and ships
-                      no data in the initial HTML — not usable here, but
+                      no data in the initial HTML - not usable here, but
                       the homepage feed covers the same ground.
   INDRA       WORKS   /home/GetRatingNews is a plain JSON route, no auth, no
                       cookies - a rolling "latest ~10 actions" feed. Rating and
@@ -40,7 +40,7 @@ headless browser, plain httpx only:
   INFOMERICS  BLOCKED Next.js app; recent-ratings streams via an RSC
                       payload, not a fetchable JSON route.
 
-BLOCKED means genuinely blocked, not "didn't try" — see `sources` in the
+BLOCKED means genuinely blocked, not "didn't try" - see `sources` in the
 returned dict. A source that can't be reached is never reported as "no
 ratings found"; that distinction is the whole point of data_status.
 """
@@ -66,7 +66,7 @@ CARE_RATING_URL = "https://www.careratings.com/getSearchprintrating"
 # No working scrape path at all (see module docstring).
 _STATICALLY_BLOCKED = ["CRISIL", "ICRA", "INFOMERICS"]
 
-# Reachable per company, but with no recent-actions feed — so they can answer
+# Reachable per company, but with no recent-actions feed - so they can answer
 # "what is X rated" and never "who moved this week". Reported as "lookup_only"
 # rather than "blocked", because calling them blocked would understate coverage
 # and calling them ok would overstate it.
@@ -110,7 +110,11 @@ def _record(source: str, ok: bool) -> None:
 
 
 # -- TTL cache: these are "latest page" snapshots, cheap to reuse for a bit --
-_TTL = 900  # 15 min
+_TTL = 900  # 15 min, for the "what moved recently" feeds
+
+# A company's own rating book changes on a surveillance cycle, not hourly, so a
+# per-company CARE lookup is safe to hold far longer than a feed.
+_CARE_TTL = 6 * 3600
 _cache: dict[str, tuple[float, list[dict]]] = {}
 
 
@@ -307,7 +311,7 @@ def parse_indra_json(payload) -> list[dict]:
 # Lookup-only: a name resolves to an opaque encrypted CompanyID, which then
 # returns that company's instruments and current ratings. There is no
 # recent-actions feed, so CARE can answer "what is X rated" but never "who
-# moved this week" — it belongs in fetch_for_company, not in the queue.
+# moved this week" - it belongs in fetch_for_company, not in the queue.
 #
 # The payload carries no action verb and no date. We deliberately emit action
 # "Current rating" and an empty date rather than inventing either: a fabricated
@@ -347,7 +351,7 @@ def parse_care_ratings(payload, company_fallback: str = "") -> list[dict]:
 async def _fetch_source(source: str, url: str, parse) -> tuple[list[dict], str]:
     """Shared fetch/cache/breaker plumbing for one HTML source.
     status: "ok" (data found), "none" (page answered, nothing parsed),
-    "blocked" (breaker tripped / non-200 / network error — NOT verified empty)."""
+    "blocked" (breaker tripped / non-200 / network error - NOT verified empty)."""
     cached = _cache.get(source)
     if cached and time.time() - cached[0] < _TTL:
         return cached[1], ("ok" if cached[1] else "none")
@@ -441,8 +445,8 @@ def _care_match(query: str, candidate: str) -> bool:
     """Is CARE's search hit actually the company we asked about?
 
     CARE's autocomplete is a substring search, so "Arka Eduserve" happily returns
-    a different Arka. Attaching another company's rating — and worse, another
-    company's default — to a lead a salesperson is about to call is the single
+    a different Arka. Attaching another company's rating - and worse, another
+    company's default - to a lead a salesperson is about to call is the single
     most damaging error this module can make, so the bar is exact-after-folding
     rather than fuzzy. A missed match costs one absent rating; a wrong match
     costs the tool its credibility."""
@@ -455,7 +459,16 @@ async def fetch_care_for_company(company_name: str) -> list[dict]:
     instruments and current ratings.
 
     Only search hits that pass `_care_match` are followed, and only the first of
-    those, so one lead never costs more than two calls."""
+    those, so one lead never costs more than two calls.
+
+    Cached per company, and that matters more here than anywhere else in this
+    module: the queue enriches fifteen leads per build, so an uncached lookup
+    means thirty CARE calls on every page load. A negative result is cached too,
+    otherwise the companies CARE does not rate would be retried forever."""
+    key = f"CARE:{_norm(company_name)}"
+    cached = _cache.get(key)
+    if cached and time.time() - cached[0] < _CARE_TTL:
+        return cached[1]
     if _tripped("CARE"):
         return []
     try:
@@ -469,6 +482,7 @@ async def fetch_care_for_company(company_name: str) -> list[dict]:
                     if _care_match(company_name, h.get("CompanyName", ""))), None)
         if top is None:
             _record("CARE", True)     # answered, just no confident match
+            _cache[key] = (time.time(), [])
             return []
         detail = await client.get(CARE_RATING_URL,
                                   params={"companyName": top.get("CompanyID", "")})
@@ -476,7 +490,9 @@ async def fetch_care_for_company(company_name: str) -> list[dict]:
             _record("CARE", False)
             return []
         _record("CARE", True)
-        return parse_care_ratings(detail.json(), top.get("CompanyName", company_name))
+        out = parse_care_ratings(detail.json(), top.get("CompanyName", company_name))
+        _cache[key] = (time.time(), out)
+        return out
     except Exception:
         _record("CARE", False)
         return []

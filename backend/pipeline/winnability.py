@@ -1,18 +1,18 @@
 """
-WINNABILITY — can ACER realistically win this mandate?
+WINNABILITY - can ACER realistically win this mandate?
 
 ROADMAP_V3 Lever 3. The old fit score asked whether a company *needs* a rating.
 Every CRA sees the same downgrade at the same hour, so need is not a
 differentiator. This asks the narrower question: is this one **winnable**.
 
-Four flags, all derived from data `fetch_credit_history` already returns — no new
+Four flags, all derived from data `fetch_credit_history` already returns - no new
 network call:
 
   first_timer     no agency rates them, and the sources were reachable enough
                   to say so (`data_status == "none_found"`)
   inc_tagged      a CRA has flagged them Issuer Not Cooperating
   self_withdrawn  a rating was withdrawn at the issuer's own request
-  multi_cra       already rated by 2+ agencies — a proven shopper
+  multi_cra       already rated by 2+ agencies - a proven shopper
 
 On top sits a CREDIT SCREEN, and it is not optional (see ROADMAP_V3 section 3).
 INC-tagged and self-withdrawn issuers often left because they could not pay;
@@ -45,7 +45,7 @@ _AT_REQUEST_RE = re.compile(
     r"at\s+the\s+(?:issuer|company|client)(?:'s|s)?\s+request|"
     r"at\s+(?:issuer|company)(?:'s|s)?\s+request|on\s+request\s+of\s+the", re.I)
 
-# Weight per flag. Deliberately flat and readable — there is no outcome data yet
+# Weight per flag. Deliberately flat and readable - there is no outcome data yet
 # to fit anything better, and pretending otherwise would dress opinion up as a
 # model. ROADMAP_V3 phase 1 puts outcome logging in before this gets tuned.
 _WEIGHTS = {
@@ -56,10 +56,10 @@ _WEIGHTS = {
 }
 
 _REASONS = {
-    "first_timer":    "No agency rates them — a first mandate, not a switch",
-    "inc_tagged":     "Tagged Issuer Not Cooperating — the relationship has broken down",
-    "self_withdrawn": "Withdrew a rating at their own request — actively shopping",
-    "multi_cra":      "Already uses {n} agencies — proven to take a third quote",
+    "first_timer":    "No agency rates them - a first mandate, not a switch",
+    "inc_tagged":     "Tagged Issuer Not Cooperating - the relationship has broken down",
+    "self_withdrawn": "Withdrew a rating at their own request - actively shopping",
+    "multi_cra":      "Already uses {n} agencies - proven to take a third quote",
 }
 
 SUPPRESS_BELOW = 40
@@ -112,11 +112,11 @@ def credit_screen(credit_data: dict) -> dict:
     """Non-negotiable gate. Returns {"pass": bool, "reason": str}."""
     if credit_data.get("data_status") == "unverified":
         return {"pass": False,
-                "reason": "Sources unreachable — creditworthiness unverified, do not call yet"}
+                "reason": "Sources unreachable - creditworthiness unverified, do not call yet"}
     worst = _worst_rating(credit_data)
     if worst:
         return {"pass": False,
-                "reason": f"Carries a speculative-grade rating ({worst}) — credit review before contact"}
+                "reason": f"Carries a speculative-grade rating ({worst}) - credit review before contact"}
     return {"pass": True, "reason": "No speculative-grade rating visible"}
 
 
@@ -140,9 +140,9 @@ def score(company: dict, credit_data: dict) -> dict:
             reasons.append(_REASONS[k].format(n=rated_by))
     if not reasons:
         reasons.append(
-            "Comfortably rated elsewhere with no trigger — low priority"
+            "Comfortably rated elsewhere with no trigger - low priority"
             if rated_by else
-            "No signal either way — rating coverage could not be established")
+            "No signal either way - rating coverage could not be established")
 
     screen = credit_screen(credit_data)
     return {

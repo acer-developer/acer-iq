@@ -220,11 +220,11 @@ def _clean_name_for_bse(name: str) -> str:
     Examples:
       "State Bank of India - Kochi Branch"  →  "State Bank of India"
       "HDFC Bank ATM"                        →  "HDFC Bank"
-      "Bajaj Finance Ltd. – Regional Office" →  "Bajaj Finance"
+      "Bajaj Finance Ltd. - Regional Office" →  "Bajaj Finance"
     """
     # Remove everything after a dash/em-dash followed by Branch/ATM/Office etc.
     name = re.sub(
-        r'\s*[-–—]\s*(Branch|ATM|Office|HO|Head Office|Regional Office|Zonal Office'
+        r'\s*[---]\s*(Branch|ATM|Office|HO|Head Office|Regional Office|Zonal Office'
         r'|Corporate Office|Registered Office|Extension Counter|Service Centre|Unit).*$',
         '', name, flags=re.IGNORECASE,
     )
@@ -244,7 +244,7 @@ def _clean_name_for_bse(name: str) -> str:
 
 
 def _short_name(name: str) -> str:
-    """Return a shorter/simpler search term — first 2-3 meaningful words."""
+    """Return a shorter/simpler search term - first 2-3 meaningful words."""
     stop = {"of", "and", "&", "the", "pvt", "ltd", "limited", "private"}
     words = [w for w in name.split() if w.lower() not in stop]
     return " ".join(words[:3])

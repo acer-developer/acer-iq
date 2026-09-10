@@ -1,4 +1,4 @@
-# Signal Radar — Roadmap
+# Signal Radar - Roadmap
 
 ## What it is
 
@@ -16,10 +16,10 @@ A BD head does not want a firehose. They want a prioritised list with a next act
 
 Signal Radar prioritises signals by strength:
 
-- **Very high** — public regulatory action (rating withdrawn, downgrade to negative watch, board resolution for NCD)
-- **High** — announced capex or expansion above Rs 100 crore, first-time issuer indication
-- **Medium** — sector-wide tailwind (results season, RBI policy), broad fund-raising activity
-- **Low** — general market chatter
+- **Very high** - public regulatory action (rating withdrawn, downgrade to negative watch, board resolution for NCD)
+- **High** - announced capex or expansion above Rs 100 crore, first-time issuer indication
+- **Medium** - sector-wide tailwind (results season, RBI policy), broad fund-raising activity
+- **Low** - general market chatter
 
 Each signal has a suggested play attached to it. Never show a signal without a suggested action.
 
@@ -30,10 +30,10 @@ Three sections, top to bottom:
 ### 1. Playbook (collapsible)
 Four strategic cards showing what to do in each market phase. Reads like a coaching guide, not a wall of text.
 
-- **Sector on the rise** — new debt raises expected. Chase debut issuers before Big 3 lock them in.
-- **Sector under stress** — rating downgrades and withdrawals happen. Chase displaced clients.
-- **Stable sector** — surveillance renewals dominate. Chase price-sensitive incumbents.
-- **First-time issuers** — no CRA relationship yet. Highest conversion, lowest cost of acquisition.
+- **Sector on the rise** - new debt raises expected. Chase debut issuers before Big 3 lock them in.
+- **Sector under stress** - rating downgrades and withdrawals happen. Chase displaced clients.
+- **Stable sector** - surveillance renewals dominate. Chase price-sensitive incumbents.
+- **First-time issuers** - no CRA relationship yet. Highest conversion, lowest cost of acquisition.
 
 Each card has:
 - The situation
@@ -108,4 +108,4 @@ CRA rating PDFs  ─►  PDF parser  ─►  Surveillance calendar (V2)
 
 ## Success metric
 
-If a BD person opens Signal Radar first thing in the morning, sees five prioritised signals, and knows which two to call before lunch — the tab has done its job.
+If a BD person opens Signal Radar first thing in the morning, sees five prioritised signals, and knows which two to call before lunch - the tab has done its job.

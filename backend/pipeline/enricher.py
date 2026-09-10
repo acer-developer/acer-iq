@@ -49,7 +49,7 @@ async def enrich_contacts(companies: list[dict]) -> list[dict]:
             if not domain:
                 continue
             if used >= MAX_HUNTER_LOOKUPS:
-                log.info("Hunter lookup cap (%d) reached — skipping contacts for "
+                log.info("Hunter lookup cap (%d) reached - skipping contacts for "
                          "the remaining leads to protect the monthly quota",
                          MAX_HUNTER_LOOKUPS)
                 break

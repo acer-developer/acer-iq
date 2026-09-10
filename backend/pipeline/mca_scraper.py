@@ -1,9 +1,9 @@
 """
-Company master data — CIN, directors, incorporation date, registered address.
+Company master data - CIN, directors, incorporation date, registered address.
 
 Source chain:
 1. Cached BSE scrip master → scrip code → CorpInfo  (CIN in Table3.fld_cin,
-   directors in Table, address in Table1 — covers listed + debt issuers)
+   directors in Table, address in Table1 - covers listed + debt issuers)
 2. Zauba Corp direct scrape                         (unlisted / private companies)
 """
 
@@ -46,7 +46,7 @@ def _get_web_client():
 _CIN_RE = re.compile(r"^[LU]\d{5}[A-Z]{2}\d{4}[A-Z]{3}\d{6}$")
 
 
-# ── BSE CorpInfo — returns CIN, directors, address ────────────────────────────
+# ── BSE CorpInfo - returns CIN, directors, address ────────────────────────────
 
 async def _bse_corp_info(scrip_code: str) -> dict:
     """
@@ -68,12 +68,12 @@ async def _bse_corp_info(scrip_code: str) -> dict:
 
             d = r.json()
 
-            # ── Table3 — CIN, Industry, Listing date ─────────────────────────
+            # ── Table3 - CIN, Industry, Listing date ─────────────────────────
             t3 = d.get("Table3", [{}])
             row3 = t3[0] if isinstance(t3, list) and t3 else {}
             cin  = row3.get("fld_cin", "").strip()
 
-            # ── Table1 — Registered address ──────────────────────────────────
+            # ── Table1 - Registered address ──────────────────────────────────
             t1   = d.get("Table1", [{}])
             row1 = t1[0] if isinstance(t1, list) and t1 else {}
             addr_parts = [
@@ -83,7 +83,7 @@ async def _bse_corp_info(scrip_code: str) -> dict:
             ]
             address = ", ".join(p for p in addr_parts if p).strip()
 
-            # ── Table — Directors ─────────────────────────────────────────────
+            # ── Table - Directors ─────────────────────────────────────────────
             directors = []
             for dr in (d.get("Table") or [])[:10]:
                 first = (dr.get("sFirstname") or "").strip()
@@ -102,7 +102,7 @@ async def _bse_corp_info(scrip_code: str) -> dict:
                 })
 
             # ── Dates ────────────────────────────────────────────────────────
-            # BSE's listing date is NOT the incorporation date — Tata Capital
+            # BSE's listing date is NOT the incorporation date - Tata Capital
             # incorporated in 1991 but listed in 2025. The CIN encodes the real
             # year of incorporation at chars 8:12, so use that and report the
             # listing date separately instead of passing it off as incorporation.
@@ -148,7 +148,7 @@ async def _bse_scrip_cin(company_name: str) -> dict:
 
 
 async def _zauba_cin(company_name: str) -> dict:
-    """Scrape Zauba Corp search page — works for unlisted/private companies."""
+    """Scrape Zauba Corp search page - works for unlisted/private companies."""
     try:
         from bs4 import BeautifulSoup
         client = _get_web_client()

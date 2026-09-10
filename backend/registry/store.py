@@ -56,7 +56,7 @@ def search(location: str, entity_type: str = "All", limit: int = 60,
     size: All | large | small  (see _SIZE_CLAUSE).
     """
     if not available():
-        log.warning("registry.sqlite missing — run python -m backend.registry.ingest")
+        log.warning("registry.sqlite missing - run python -m backend.registry.ingest")
         return []
 
     loc = location.split(",")[0].strip()

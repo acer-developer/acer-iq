@@ -21,7 +21,7 @@ def get_client():
         from supabase import create_client
         _client = create_client(settings.supabase_url, settings.supabase_key)
     except Exception as e:
-        log.error("Supabase client init failed — searches will not survive a "
+        log.error("Supabase client init failed - searches will not survive a "
                   "restart and CSV export will 404: %s: %s", type(e).__name__, e)
         _client, _init_failed = None, True
     return _client
@@ -39,7 +39,7 @@ def save_search(search_id: str, city: str, industry: str, companies: list):
             "results": json.dumps([c.model_dump() for c in companies]),
         }).execute()
     except Exception as e:
-        log.error("save_search(%s) failed — CSV export will break after a "
+        log.error("save_search(%s) failed - CSV export will break after a "
                   "restart: %s: %s", search_id, type(e).__name__, e)
 
 

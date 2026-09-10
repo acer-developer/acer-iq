@@ -43,7 +43,7 @@ PIN_STATE = {
     "90": "APS", "403": "Goa",
 }
 
-# City centroids — superset of the map dict in pipeline/discovery.py
+# City centroids - superset of the map dict in pipeline/discovery.py
 CITY_COORDS: dict[str, tuple[float, float]] = {
     "mumbai": (19.0760, 72.8777), "delhi": (28.6139, 77.2090),
     "new delhi": (28.6139, 77.2090), "bengaluru": (12.9716, 77.5946),

@@ -112,7 +112,7 @@ export default function Sidebar({ companies, loading, selectedId, onSelectCompan
                     ${company.score >= 80 ? "text-red-500" :
                       company.score >= 60 ? "text-orange-500" :
                       company.score >= 40 ? "text-amber-500" : "text-gray-300"}`}>
-                    {company.score || "—"}
+                    {company.score || "-"}
                   </span>
                 </div>
               </div>

@@ -14,7 +14,7 @@ export default function SourceHealth({ sources, className = "" }) {
       className={`rounded-xl border border-amber-200 bg-amber-50 px-4 py-2.5 ${className}`}
     >
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-amber-900">
-        <span className="font-semibold">Incomplete data —</span>
+        <span className="font-semibold">Incomplete data -</span>
         {degraded.map((s) => (
           <span key={s.name} className="inline-flex items-center gap-1">
             <span className="h-1.5 w-1.5 rounded-full bg-amber-500" />

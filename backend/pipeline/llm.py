@@ -5,8 +5,8 @@ Providers are tried in order and the first usable reply wins, so a dead key or
 a rate-limited free tier degrades to the next provider instead of silently
 dropping AI analysis:
 
-  1. OpenRouter   — free models, e.g. meta-llama/llama-3.3-70b-instruct:free
-  2. TokenRouter  — fallback, z-ai/glm-5.3-free
+  1. OpenRouter   - free models, e.g. meta-llama/llama-3.3-70b-instruct:free
+  2. TokenRouter  - fallback, z-ai/glm-5.3-free
 
 With no provider configured, chat() returns None and callers fall back to
 rule-based scoring.
@@ -93,7 +93,7 @@ async def chat(prompt: str, max_tokens: int = 600) -> str | None:
                 # A truncated reply is worse than no reply: it parses as broken
                 # JSON and the caller reports a confident wrong answer.
                 if choice.get("finish_reason") == "length" and not text.endswith("}"):
-                    log.warning("%s reply truncated at max_tokens — trying next provider",
+                    log.warning("%s reply truncated at max_tokens - trying next provider",
                                 p["name"])
                     continue
                 if not text:

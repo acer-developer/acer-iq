@@ -6,7 +6,7 @@ import { apiUrl } from "../lib/api.js";
 // TODO(supabase): once auth exists, POST this lead to a `saved_leads` table
 // scoped to the logged-in user's id instead of just logging it.
 function saveLead(lead) {
-  console.log("[stub] saveLead — would persist to Supabase once auth exists:", lead);
+  console.log("[stub] saveLead - would persist to Supabase once auth exists:", lead);
 }
 
 const FLAG_META = {
@@ -78,7 +78,7 @@ function QueueRow({ lead, onAdd }) {
           )}
           {lead.blocked && (
             <span className="inline-flex rounded-full border border-red-300 bg-red-100 px-2 py-0.5 text-[10px] font-bold text-red-700">
-              BLOCKED — DO NOT CALL YET
+              BLOCKED - DO NOT CALL YET
             </span>
           )}
         </div>

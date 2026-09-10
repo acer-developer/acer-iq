@@ -1,5 +1,5 @@
 """
-NSE sector indices — live percent change so we know which sectors are
+NSE sector indices - live percent change so we know which sectors are
 bullish vs bearish today.
 
 Uses the same NSE cookie-warmup pattern as market_news.py.

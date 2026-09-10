@@ -291,7 +291,7 @@ def test_speculative_grades_are_caught():
 # ── India Ratings title parsing ──────────────────────────────────────────────
 
 def test_indra_rating_keeps_its_modifier():
-    """'IND BB+' must not degrade to 'IND BB' — a lost +/- moves the grade."""
+    """'IND BB+' must not degrade to 'IND BB' - a lost +/- moves the grade."""
     from backend.pipeline.cra_press import parse_indra_json
     rows = [{"issuerName": "X Ltd", "pressReleaseID": 1, "prDate": "Sep 10, 2026",
              "pressReleaseTitle": "India Ratings Affirms X at 'IND BB+'/Stable"}]
@@ -316,8 +316,8 @@ def test_care_never_invents_a_date():
 
 def test_care_lookup_refuses_a_different_company():
     """CARE's autocomplete is a substring search, so it will happily return a
-    different company with a similar name. Attaching another company's rating —
-    or another company's default — to a lead someone is about to call is the
+    different company with a similar name. Attaching another company's rating -
+    or another company's default - to a lead someone is about to call is the
     worst error this module can make."""
     from backend.pipeline.cra_press import _care_match
     assert _care_match("Berar Finance Ltd", "Berar Finance Limited") is True
@@ -326,6 +326,49 @@ def test_care_lookup_refuses_a_different_company():
                        "Arka Educational & Cultural Trust") is False
     assert _care_match("Tata Motors Limited", "Tata Steel Limited") is False
     assert _care_match("", "Anything Ltd") is False
+
+
+def test_care_lookups_are_cached_including_misses():
+    """The queue enriches 15 leads per build, so an uncached CARE lookup means
+    30 calls on every page load and a rate-limit ban. Misses must cache too, or
+    the companies CARE does not rate get retried forever."""
+    from backend.pipeline import cra_press
+
+    calls = {"n": 0}
+
+    class _Resp:
+        status_code = 200
+
+        def __init__(self, payload):
+            self._payload = payload
+
+        def json(self):
+            return self._payload
+
+    async def fake_get(url, params=None, **kw):
+        calls["n"] += 1
+        if "searchlist" in url:
+            return _Resp({"data": [{"CompanyID": "tok", "CompanyName": "Cached Co Limited"}]})
+        return _Resp({"data": [{"Company": "Cached Co Limited", "CompanyInstrument": [
+            {"Instrument": "Term Loan", "Rating": "CARE BBB; Stable"}]}]})
+
+    class _Client:
+        get = staticmethod(fake_get)
+
+    real_client, real_cache = cra_press._get_client, dict(cra_press._cache)
+    cra_press._get_client = lambda: _Client()
+    cra_press._cache.clear()
+    try:
+        first = asyncio.run(cra_press.fetch_care_for_company("Cached Co Limited"))
+        after_first = calls["n"]
+        second = asyncio.run(cra_press.fetch_care_for_company("Cached Co Ltd"))
+        assert after_first == 2, f"first lookup should cost 2 calls, cost {after_first}"
+        assert calls["n"] == after_first, "repeat lookup must not hit the network"
+        assert first == second and len(first) == 1
+    finally:
+        cra_press._get_client = real_client
+        cra_press._cache.clear()
+        cra_press._cache.update(real_cache)
 
 
 if __name__ == "__main__":

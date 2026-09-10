@@ -16,7 +16,7 @@ class ErrorBoundary extends React.Component {
     if (this.state.error) {
       return (
         <div style={{ padding: 40, fontFamily: "monospace", background: "#fff1f2", minHeight: "100vh" }}>
-          <h2 style={{ color: "#b91c1c" }}>App crashed — error details:</h2>
+          <h2 style={{ color: "#b91c1c" }}>App crashed - error details:</h2>
           <pre style={{ whiteSpace: "pre-wrap", color: "#991b1b", fontSize: 13 }}>
             {this.state.error.toString()}
             {"\n\n"}

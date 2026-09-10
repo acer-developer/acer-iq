@@ -1,14 +1,14 @@
 """
-Registry ingestion — builds backend/registry/data/registry.sqlite from RBI sources.
+Registry ingestion - builds backend/registry/data/registry.sqlite from RBI sources.
 
 Run locally (needs openpyxl + pdfplumber, see requirements-ingest.txt):
     python -m backend.registry.ingest            # use cached downloads if present
     python -m backend.registry.ingest --fresh    # force re-download from RBI
 
 Sources:
-  1. RBI List of NBFCs & ARCs (XLSX) — name, classification, layer, deposit CoR,
+  1. RBI List of NBFCs & ARCs (XLSX) - name, classification, layer, deposit CoR,
      CIN, address, email. ~9,000 NBFCs + ~30 ARCs.
-  2. RBI Scheduled + Non-Scheduled UCB lists (PDF) — head office address + pincode.
+  2. RBI Scheduled + Non-Scheduled UCB lists (PDF) - head office address + pincode.
      ~1,900 cooperative banks. HEAD OFFICES ONLY by construction.
   3. Hardcoded: 11 Small Finance Banks (HQ city).
 
@@ -101,7 +101,7 @@ def _download(client: httpx.Client, warmup_page: str, url: str, dest: Path,
     if r.status_code != 200 or not r.content.startswith(magic):
         raise RuntimeError(
             f"download failed for {url}: status={r.status_code}, "
-            f"head={r.content[:20]!r} (RBI anti-bot challenge — warmup page may have changed)"
+            f"head={r.content[:20]!r} (RBI anti-bot challenge - warmup page may have changed)"
         )
     dest.write_bytes(r.content)
     log.info("downloaded: %s (%d bytes)", dest.name, len(r.content))
@@ -199,7 +199,7 @@ def parse_ucb_pdf(path: Path, scheduled: bool) -> list[dict]:
 
 
 def parse_nse_equity(path: Path) -> list[dict]:
-    """All NSE-listed companies — symbol, official name, ISIN. The complete
+    """All NSE-listed companies - symbol, official name, ISIN. The complete
     listed universe for Company Research (every sector, not just finance)."""
     import csv as _csv
     rows: list[dict] = []

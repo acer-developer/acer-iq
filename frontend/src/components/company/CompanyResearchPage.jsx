@@ -168,7 +168,7 @@ function CompanySearchInput({ onSearch, loading }) {
 
 // ── Rating badge ──────────────────────────────────────────────────────────────
 function RatingBadge({ rating }) {
-  if (!rating || rating === "—") return <span className="text-gray-300">—</span>;
+  if (!rating || rating === "-") return <span className="text-gray-300">-</span>;
   const cls =
     rating.startsWith("AAA") ? "text-green-700 bg-green-50 border-green-200" :
     rating.startsWith("AA")  ? "text-emerald-700 bg-emerald-50 border-emerald-200" :
@@ -205,7 +205,7 @@ function AgencyRow({ agency, unverified }) {
         <td className="px-4 py-3">
           {agency.is_rated ? <RatingBadge rating={agency.latest_rating} /> : (
             <span className={`text-xs ${unverified ? "text-amber-500 font-medium" : "text-gray-400"}`}>
-              {unverified ? "Unknown — verify" : "Not rated"}
+              {unverified ? "Unknown - verify" : "Not rated"}
             </span>
           )}
         </td>
@@ -248,12 +248,12 @@ function AgencyRow({ agency, unverified }) {
       {expanded && agency.instruments.map((inst, i) => (
         <tr key={i} className="border-b border-gray-50 bg-gray-50/50">
           <td className="py-2 pl-12 pr-4 text-xs" colSpan={2}>
-            <div className="font-medium text-gray-700">{inst.security_name || "—"}</div>
+            <div className="font-medium text-gray-700">{inst.security_name || "-"}</div>
             {inst.isin && <div className="font-mono text-[10px] text-gray-400">{inst.isin}</div>}
           </td>
-          <td className="py-2 px-4 text-xs text-gray-500">{inst.instrument_type || "—"}</td>
-          <td className="py-2 px-4 text-xs text-gray-500">{inst.coupon_rate ? `${inst.coupon_rate}%` : "—"}</td>
-          <td className="py-2 px-4 text-xs text-gray-500">{inst.maturity_date || inst.issue_date || "—"}</td>
+          <td className="py-2 px-4 text-xs text-gray-500">{inst.instrument_type || "-"}</td>
+          <td className="py-2 px-4 text-xs text-gray-500">{inst.coupon_rate ? `${inst.coupon_rate}%` : "-"}</td>
+          <td className="py-2 px-4 text-xs text-gray-500">{inst.maturity_date || inst.issue_date || "-"}</td>
         </tr>
       ))}
     </>
@@ -420,7 +420,7 @@ function CompanyInfo({ company }) {
                 target="_blank" rel="noreferrer"
                 className="group inline-flex items-center gap-1.5 rounded-full border border-gray-200 bg-gray-50
                   px-2.5 py-1 text-xs text-gray-700 transition hover:border-blue-300 hover:bg-blue-50"
-                title={`${d.designation || "Director"} — search on LinkedIn`}
+                title={`${d.designation || "Director"} - search on LinkedIn`}
               >
                 <span className="font-medium">{d.name}</span>
                 {d.designation && (
@@ -520,7 +520,7 @@ export default function CompanyResearchPage() {
                 <div className="mb-4 flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
                   <span className="mt-0.5 text-amber-500">⚠</span>
                   <div className="text-xs text-amber-800">
-                    <span className="font-bold">Rating history could not be verified right now</span> — NSE/BSE
+                    <span className="font-bold">Rating history could not be verified right now</span> - NSE/BSE
                     disclosure sources are unreachable. The statuses below mean
                     <span className="font-semibold"> unknown</span>, not unrated. Use the per-agency Search
                     links to verify manually.
@@ -531,7 +531,7 @@ export default function CompanyResearchPage() {
               {/* Stats */}
               <div className="mb-5 grid grid-cols-3 gap-3">
                 {[
-                  { label: "Rating Actions & Instruments", value: unverified ? "—" : totalInstruments, color: "text-blue-600 bg-blue-50" },
+                  { label: "Rating Actions & Instruments", value: unverified ? "-" : totalInstruments, color: "text-blue-600 bg-blue-50" },
                   { label: "Agencies Rating",   value: unverified ? "?" : `${ratedByCount} / 7`, color: "text-emerald-600 bg-emerald-50" },
                   { label: unverified ? "Unverified" : "Not Rated By", value: unverified ? "7" : 7 - ratedByCount, color: "text-amber-600 bg-amber-50" },
                 ].map(({ label, value, color }) => (
@@ -546,7 +546,7 @@ export default function CompanyResearchPage() {
               <div className="overflow-hidden rounded-xl border border-gray-200 bg-white">
                 <div className="flex items-center justify-between border-b border-gray-100 px-4 py-3">
                   <h3 className="text-sm font-bold text-gray-900">
-                    Credit Rating History — All 7 Agencies
+                    Credit Rating History - All 7 Agencies
                   </h3>
                   <span className="text-xs text-gray-400">Source: NSE corporate disclosures + BSE debt data</span>
                 </div>
@@ -574,7 +574,7 @@ export default function CompanyResearchPage() {
                     <h3 className="text-sm font-bold text-gray-900">
                       Rating Disclosure Timeline ({result.credit_data.rating_actions.length})
                     </h3>
-                    <span className="text-xs text-gray-400">NSE corporate filings — click to open the actual document</span>
+                    <span className="text-xs text-gray-400">NSE corporate filings - click to open the actual document</span>
                   </div>
                   <div className="max-h-80 overflow-y-auto divide-y divide-gray-50">
                     {result.credit_data.rating_actions.map((a, i) => (
@@ -614,7 +614,7 @@ export default function CompanyResearchPage() {
 
               {totalInstruments === 0 && !unverified && (
                 <p className="mt-4 text-center text-sm text-gray-400">
-                  No exchange-disclosed rating actions or listed instruments matched this exact name —
+                  No exchange-disclosed rating actions or listed instruments matched this exact name -
                   company may be unrated, privately rated, or disclosed under a different legal spelling.
                 </p>
               )}

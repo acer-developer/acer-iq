@@ -11,7 +11,7 @@ _ENTITY_LABEL = {
     "Banks": "Bank", "NBFCs": "NBFC", "Corporates": "Corporate", "All": "Financial Entity",
 }
 
-# ── Major national/commercial banks — already rated by all agencies, not leads ─
+# ── Major national/commercial banks - already rated by all agencies, not leads ─
 # Only cooperative banks, small finance banks, RRBs, UCBs are worth targeting
 _LARGE_BANKS_BLOCKLIST = {
     "state bank of india", "sbi", "hdfc bank", "icici bank", "axis bank",
@@ -171,13 +171,13 @@ def _address(tags: dict) -> str:
 # ── Entity-specific Overpass queries ─────────────────────────────────────────
 
 def _build_overpass_query(lat: float, lng: float, entity_type: str, radius: int) -> str:
-    """Separate query per entity type — prevents bank-heavy OSM data from
+    """Separate query per entity type - prevents bank-heavy OSM data from
     drowning out NBFCs and Corporates in mixed results."""
 
     if entity_type == "Banks":
         # Head offices of cooperative banks, small finance banks, RRBs, UCBs only.
         # Using office=bank / office=financial tags which OSM uses for HQ-level entries,
-        # plus name-pattern search. Branches are tagged amenity=bank — we exclude those.
+        # plus name-pattern search. Branches are tagged amenity=bank - we exclude those.
         return f"""[out:json][timeout:30];
 (
   node["office"="bank"](around:{radius},{lat},{lng});
@@ -213,7 +213,7 @@ out center 60;"""
 );
 out center 60;"""
 
-    else:  # All — pull HQ-tagged offices across all types
+    else:  # All - pull HQ-tagged offices across all types
         return f"""[out:json][timeout:30];
 (
   node["office"~"bank|financial|insurance|company"](around:{radius},{lat},{lng});
@@ -247,10 +247,10 @@ async def _overpass_search(lat: float, lng: float, entity_type: str,
         if not name or name.lower() in seen:
             continue
 
-        # Skip branches, ATMs, kiosks — we want head offices only
+        # Skip branches, ATMs, kiosks - we want head offices only
         name_lower = name.lower()
         _branch_indicators = (
-            " branch", " br.", " br ", "- branch", "– branch",
+            " branch", " br.", " br ", "- branch", "- branch",
             " atm", "kiosk", "extension counter", "extension office",
             " regional office", " zonal office", " circle office",
             " divisional office", " district office", " sub office",
@@ -270,7 +270,7 @@ async def _overpass_search(lat: float, lng: float, entity_type: str,
         if entity_type == "Corporates" and entity != "Corporate":
             continue
 
-        # Skip large national/commercial banks — already rated by all agencies
+        # Skip large national/commercial banks - already rated by all agencies
         # ACER targets: cooperative banks, small finance banks, RRBs, UCBs
         if entity == "Bank":
             if any(bl in name_lower for bl in _LARGE_BANKS_BLOCKLIST):
@@ -325,7 +325,7 @@ async def discover_companies(
 
     # ── Primary: RBI registry (complete universe of head offices) ────────────
     # Banks → UCBs + SFBs; NBFCs → RBI-registered NBFCs/ARCs.
-    # Corporates are not in the registry yet (MCA ingest pending) — they still
+    # Corporates are not in the registry yet (MCA ingest pending) - they still
     # go through OSM/Places below.
     from backend.registry import store as registry_store
     companies: list[dict] = []
