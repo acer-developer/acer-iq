@@ -7,7 +7,6 @@ import CompanyResearchPage from "./components/company/CompanyResearchPage.jsx";
 import MarketNewsPage from "./components/MarketNewsPage.jsx";
 import SignalRadarPage from "./components/SignalRadarPage.jsx";
 import QueuePage from "./components/QueuePage.jsx";
-import ComingSoon from "./components/ComingSoon.jsx";
 import SourceHealth from "./components/SourceHealth.jsx";
 import { apiUrl } from "./lib/api.js";
 
@@ -19,7 +18,6 @@ const TAB_INFO = {
   news: "Tracks corporate announcements from NSE that signal upcoming funding needs: expansion plans, capex approvals, fund raising resolutions, acquisitions, and rating actions. Every item is a real exchange filing, not a prediction.",
   research: "Look up any Indian company to see its credit rating history across all SEBI-registered agencies. Shows which agencies currently rate the company and identifies opportunities for ACER: first-time mandates, second opinions, or renewals.",
   directory: "Browse the registry of 12,800+ Indian financial entities (NBFCs, banks, ARCs) from RBI official lists and NSE-listed companies. Use filters to find companies by location and type.",
-  pipeline: "Track leads from discovery to conversion. Move companies through stages: identified, contacted, meeting done, proposal sent, mandated, or lost. Connects to signals and news so no lead gets forgotten.",
 };
 
 function InfoButton({ tabId }) {
@@ -90,12 +88,6 @@ function TabBar({ active, onChange }) {
           d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
       </svg>
     ), label: "Company Directory" },
-    { id: "pipeline", icon: (
-      <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-        <path strokeLinecap="round" strokeLinejoin="round"
-          d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
-      </svg>
-    ), label: "My Pipeline" },
   ];
 
   return (
@@ -392,19 +384,6 @@ export default function App() {
         </>
       )}
 
-      {/* My Pipeline (coming soon) */}
-      {activeTab === "pipeline" && (
-        <ComingSoon
-          title="My Pipeline"
-          description="Track leads from discovery to conversion. Move companies through stages: identified, contacted, meeting done, proposal sent, mandated, or lost. Connects to signals and news so no lead gets forgotten."
-          icon={
-            <svg className="h-8 w-8 text-blue-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-              <path strokeLinecap="round" strokeLinejoin="round"
-                d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
-            </svg>
-          }
-        />
-      )}
 
     </div>
   );
