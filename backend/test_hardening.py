@@ -7,7 +7,8 @@ import time
 from collections import Counter
 
 from backend import main
-from backend.pipeline import winnability, lead_queue
+from backend.pipeline import (winnability, lead_queue, snapshot_store,
+                              renewal, refinance)
 
 
 async def _boom():
@@ -505,6 +506,206 @@ def test_lead_routes_are_registered_and_events_is_not_a_company_name():
               "/api/leads/{company_name}/stage"):
         assert p in paths, f"{p} missing"
     assert paths.index("/api/leads/events") < paths.index("/api/leads/{company_name}")
+
+
+# -- Feed archive (ROADMAP_V3 phase 2: daily snapshots) -----------------------
+
+def _temp_archive():
+    """snapshot_store pointed at a throwaway DB, so these never touch the real
+    archive."""
+    import tempfile
+    from pathlib import Path
+    tmp = tempfile.TemporaryDirectory()
+    snapshot_store.DB_PATH = Path(tmp.name) / "t.sqlite"
+    return tmp
+
+
+def test_refetching_a_feed_does_not_inflate_the_archive():
+    """The queue refetches on every request and the feeds serve the same page 1
+    each time. If that appended, a week of ordinary use would manufacture
+    thousands of phantom rating actions."""
+    real = snapshot_store.DB_PATH
+    tmp = _temp_archive()
+    try:
+        a = {"agency": "ACUITE", "company_name": "Alpha Ltd", "rating": "A",
+             "action": "Downgrade", "date": "01-09-2026"}
+        assert snapshot_store.record_snapshot([a])["added"] == 1
+        assert snapshot_store.record_snapshot([a])["added"] == 0
+        assert snapshot_store.record_snapshot([a, a])["added"] == 0
+        assert snapshot_store.stats()["actions"] == 1
+    finally:
+        snapshot_store.DB_PATH = real
+        tmp.cleanup()
+
+
+def test_archive_recovers_actions_the_live_feed_has_dropped():
+    """The whole point of the archive: page 1 rotates, and an action that has
+    fallen off it must still reach the queue."""
+    real = snapshot_store.DB_PATH
+    tmp = _temp_archive()
+    try:
+        old = {"agency": "INDRA", "company_name": "Beta Ltd", "rating": "IND BBB",
+               "action": "Withdrawn", "date": "01-09-2026"}
+        fresh = {"agency": "INDRA", "company_name": "Gamma Ltd", "rating": "IND A",
+                 "action": "Affirmed", "date": "10-09-2026"}
+        snapshot_store.record_snapshot([old, fresh])
+
+        # Today the feed only carries the fresh one.
+        merged, info = snapshot_store.merge_with_archive([fresh], days=365)
+        assert info["recovered"] == 1, info
+        assert {m["company_name"] for m in merged} == {"Beta Ltd", "Gamma Ltd"}
+        # And the one still live is not double-counted.
+        assert len(merged) == 2, merged
+    finally:
+        snapshot_store.DB_PATH = real
+        tmp.cleanup()
+
+
+def test_two_runs_in_one_second_are_two_runs():
+    """`at` only has second precision. A UNIQUE(at) here silently discarded the
+    second run, which made the archive look like it had never grown."""
+    real = snapshot_store.DB_PATH
+    tmp = _temp_archive()
+    try:
+        snapshot_store.record_snapshot([])
+        snapshot_store.record_snapshot([])
+        assert snapshot_store.stats()["runs"] == 2
+    finally:
+        snapshot_store.DB_PATH = real
+        tmp.cleanup()
+
+
+def test_never_run_is_distinguishable_from_nothing_published():
+    """Opposite responses: one means go look at the scraper, the other means it
+    was a quiet week."""
+    real = snapshot_store.DB_PATH
+    tmp = _temp_archive()
+    try:
+        assert snapshot_store.stats()["runs"] == 0
+        snapshot_store.record_snapshot([])
+        s = snapshot_store.stats()
+        assert s["runs"] == 1 and s["actions"] == 0, s
+    finally:
+        snapshot_store.DB_PATH = real
+        tmp.cleanup()
+
+
+def test_a_queue_still_builds_when_the_archive_is_unusable():
+    """The archive is an enhancement. If it throws, the queue must degrade to the
+    live feed rather than fail - a short memory beats no queue."""
+    real = snapshot_store.DB_PATH
+    from pathlib import Path
+    snapshot_store.DB_PATH = Path("Z:/definitely/not/writable/x.sqlite")
+    try:
+        q = asyncio.run(lead_queue.build_queue(days=1, enrich=0))
+        assert "leads" in q and q["coverage"]["archive"] is None, q["coverage"]
+    finally:
+        snapshot_store.DB_PATH = real
+
+
+# -- Renewal calendar (ROADMAP_V3 phase 2) -----------------------------------
+
+def test_a_predicted_review_date_never_looks_published():
+    """No CRA publishes a next-surveillance date. Every row must say which basis
+    produced it, or BD reads a computed date as a fact."""
+    from datetime import datetime
+    today = datetime(2026, 9, 11)
+    measured = renewal.predict_next_review("10-09-2026", "19-08-2025", today)
+    guessed = renewal.predict_next_review("10-09-2026", "", today)
+    assert measured["basis"] == "observed" and guessed["basis"] == "annual"
+    assert measured["basis"] != guessed["basis"], "the two must be distinguishable"
+    assert guessed["interval_days"] == renewal.DEFAULT_INTERVAL_DAYS
+
+
+def test_a_wild_interval_does_not_project_years_out():
+    """An issuer re-rated after a long gap would otherwise get a due date far in
+    the future and quietly vanish from the calendar."""
+    from datetime import datetime
+    r = renewal.predict_next_review("10-09-2026", "01-01-2015", datetime(2026, 9, 11))
+    assert r["interval_days"] == renewal.DEFAULT_INTERVAL_DAYS, r
+    assert "out of band" in r["basis"], r
+
+
+def test_rated_amount_is_not_read_off_the_sensitivity_narrative():
+    """Regression from live data: the Gulzar rationale rates a Rs 125 Cr book and
+    quotes a Rs 500 Crs revenue trigger further down. Reading the largest figure
+    overstated the issuer four-fold."""
+    live = ("ratings for the Bank Loan Facilities of Rs. 125.00 crores "
+            "RATING SENSITIVITIES Positive: revenue above Rs. 500 Crs")
+    assert renewal.parse_rated_amount(live) == 125.0
+
+
+def test_previous_date_survives_the_wrapped_table_header():
+    """pdfplumber flattens the facilities table so the header reads
+    `Previous Present (19-August-2025) Present`. Anchoring on the word
+    "Previous" matched nothing at all on every real document."""
+    assert renewal.parse_previous_action_date(
+        "Facilities** Tenure Previous Present (19-August-2025) Present Regulator"
+    ) == "19-08-2025"
+    assert renewal.parse_previous_action_date("Previous (31-February-2025)") == "",         "an impossible date is refused, not coerced"
+
+
+def test_calendar_is_one_row_per_issuer_not_per_facility():
+    """A company with nine rated facilities is one phone call. Nine rows for it
+    would bury every other issuer on the page."""
+    from datetime import datetime
+    actions = [{"company_name": "Gulzar Motors Pvt. Ltd.", "agency": "BRICKWORK",
+                "rating": f"BWR {g}", "action": "Assigned", "date": "10-09-2026"}
+               for g in ("BBB-", "A3", "BB")]
+    cal = renewal.build_calendar(actions, today=datetime(2026, 9, 11))
+    assert len(cal) == 1, cal
+    assert cal[0]["agencies"] == ["BRICKWORK"]
+
+
+# -- Refinance window (ROADMAP_V3 phase 2) -----------------------------------
+
+def test_unreadable_maturity_is_unknown_not_absent():
+    """Most CP scrip ids do not follow BSE's convention. Counting them as "no
+    maturity" would report an issuer as having nothing due when we simply could
+    not tell."""
+    w = refinance.window_for(
+        [{"maturity_date": "2027"}, {"maturity_date": ""}, {"maturity_date": "junk"}],
+        2026, 2)
+    assert w["unknown_maturity"] == 2 and w["maturing_count"] == 1, w
+
+
+def test_matured_paper_is_not_a_refinance_signal():
+    w = refinance.window_for([{"maturity_date": "2019"}], 2026, 2)
+    assert w["maturing_count"] == 0 and w["urgency"] == "none", w
+    assert w["already_matured"] == 1
+
+
+def test_a_misread_scrip_id_does_not_become_eighty_year_paper():
+    assert refinance._year_of({"maturity_date": "2205"}) is None
+    assert refinance._year_of({"maturity_date": "2027"}) == 2027
+
+
+def test_a_bse_outage_is_not_an_empty_refinance_list():
+    """The distinction this whole codebase exists to preserve: no result is not
+    the same fact as no maturities."""
+    import backend.pipeline.bse_scraper as bse
+
+    async def _dead():
+        return {}
+
+    # Patching the loader, not `_master`: an empty dict is falsy, so
+    # `_load_master` treats it as "not cached yet" and goes to the network -
+    # which made this test quietly hit BSE for real and pass on live data.
+    real = bse._load_master
+    bse._load_master = _dead
+    try:
+        d = asyncio.run(refinance.fetch_refinance_list(2))
+        assert d["data_status"] == "unverified", d
+        assert d["issuers"] == [] and "not an empty result" in d["note"], d
+    finally:
+        bse._load_master = real
+
+
+def test_refinance_endpoint_rejects_a_silly_horizon():
+    paths = {r.path for r in main.app.routes if hasattr(r, "path")}
+    assert "/api/refinance" in paths
+    assert "/api/renewals" in paths
+    assert "/api/history" in paths
 
 
 if __name__ == "__main__":

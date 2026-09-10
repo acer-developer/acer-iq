@@ -41,3 +41,6 @@ __pycache__
 
 # local pipeline database (saved leads + outcome log)
 backend/registry/data/pipeline.sqlite
+
+# local CRA feed archive (grows on every queue request; rebuilt by using the app)
+backend/registry/data/snapshots.sqlite

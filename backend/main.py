@@ -29,7 +29,7 @@ from backend.pipeline.credit_history import fetch_credit_history
 from backend.pipeline.fit_analyzer import analyze_fit
 from backend.pipeline import winnability as winnability_scorer
 from backend.pipeline.lead_queue import build_queue
-from backend.pipeline import pipeline_store
+from backend.pipeline import pipeline_store, refinance, renewal, snapshot_store
 from backend.pipeline.market_news import fetch_market_news
 from backend.pipeline.rss_news import fetch_rss_news
 from backend.pipeline.sector_indices import fetch_sector_indices
@@ -348,6 +348,83 @@ class StageRequest(BaseModel):
     note: str = ""
 
 
+@app.get("/api/refinance")
+async def get_refinance_window(horizon_years: int = 2):
+    """Issuers whose listed BSE debt matures inside the horizon and therefore
+    has to be refinanced - and rated again - ahead of it.
+
+    Costs no new network call: the BSE scrip master is already cached for the
+    company search. Maturity resolves to a YEAR, never a date; see the module."""
+    if horizon_years < 1 or horizon_years > 10:
+        raise HTTPException(status_code=400,
+                            detail="horizon_years must be between 1 and 10")
+    return await refinance.fetch_refinance_list(horizon_years)
+
+
+@app.get("/api/renewals")
+async def get_renewal_calendar(days: int = 365, enrich: int = 10,
+                               urgency: str | None = None):
+    """The renewal calendar: who is next due for surveillance.
+
+    Built off the snapshot archive, so it deepens as the archive does. Every
+    row carries `basis` because these are PREDICTED dates - no CRA publishes a
+    next-review date, and a computed date that looks published is exactly the
+    false precision this product refuses to ship.
+    """
+    if days < 1 or days > 3650:
+        raise HTTPException(status_code=400, detail="days must be between 1 and 3650")
+    if enrich < 0 or enrich > 50:
+        raise HTTPException(status_code=400, detail="enrich must be between 0 and 50")
+
+    actions = snapshot_store.actions_within(days)
+    rows = renewal.build_calendar(actions)
+
+    enriched = 0
+    if enrich:
+        try:
+            enriched = await renewal.enrich_from_rationales(rows, enrich)
+        except Exception:
+            # Enrichment is optional sharpening; the calendar still stands
+            # without it, on the annual floor.
+            log.warning("renewals: rationale enrichment failed", exc_info=True)
+
+    if urgency:
+        rows = [r for r in rows if r["urgency"] == urgency]
+
+    counts = Counter(r["urgency"] for r in rows)
+    return {
+        "renewals": rows,
+        "total": len(rows),
+        "window_days": days,
+        "enriched": enriched,
+        "by_urgency": dict(counts),
+        "archive": snapshot_store.stats(),
+        "basis_note": (
+            "Predicted, not published. No CRA states a next-surveillance date, "
+            "so each row is the issuer's last action plus either its own "
+            "measured review interval (basis 'observed') or the 365-day "
+            "regulatory floor (basis 'annual')."
+        ),
+    }
+
+
+@app.get("/api/history")
+async def get_feed_history(days: int = 90, agency: str | None = None,
+                           company_name: str | None = None):
+    """The archived CRA feed, which reaches further back than the live feeds can.
+
+    The three readable feeds are page-1 snapshots, so `/api/queue` alone can only
+    ever see the last few weeks. Everything archived by past requests is here,
+    plus `stats` so a caller can tell a thin archive from a thin week."""
+    if days < 1 or days > 3650:
+        raise HTTPException(status_code=400, detail="days must be between 1 and 3650")
+    return {
+        "actions": snapshot_store.actions_within(days, agency, company_name),
+        "window_days": days,
+        "stats": snapshot_store.stats(),
+    }
+
+
 @app.get("/api/leads")
 async def get_saved_leads(stage: str | None = None):
     return {"leads": pipeline_store.list_leads(stage),
@@ -399,15 +476,48 @@ async def get_sectors():
 
 # ── Market News ──────────────────────────────────────────────────────────────
 
+def _mentions_company(item: dict, needle: str) -> bool:
+    """Does this news item actually name the company?
+
+    Matched on the suffix-stripped form (bse_scraper._norm), because a feed
+    writes "Bajaj Finance" where the rating action says "Bajaj Finance Ltd.".
+    Substring on the normalised name, not token overlap: token overlap makes
+    "India Cements" match every headline containing the word India, and two bad
+    matches in a briefing is all it takes for BD to stop trusting the tool.
+    """
+    from backend.pipeline.bse_scraper import _norm
+
+    target = _norm(needle)
+    if len(target) < 4:
+        return False
+    haystack = _norm(" ".join(str(item.get(k) or "") for k in
+                             ("company", "subject", "description")))
+    return target in haystack
+
+
 @app.get("/api/news")
-async def get_market_news(days: int = 7, source: str = "all"):
+async def get_market_news(days: int = 7, source: str = "all",
+                          company_name: str | None = None):
+    """Market news. With `company_name` this becomes the briefing surface
+    ROADMAP_V3 asks for: news about one company someone is about to call,
+    rather than a global feed. The roadmap is explicit that this prepares a
+    call and never ranks the pipeline."""
     if days < 1 or days > 30:
         raise HTTPException(status_code=400, detail="days must be between 1 and 30")
 
     if source == "nse":
-        return await fetch_market_news(days)
+        data = await fetch_market_news(days)
+        if company_name:
+            data["items"] = [i for i in data.get("items", [])
+                             if _mentions_company(i, company_name)]
+        return data
     if source == "rss":
-        return await fetch_rss_news()
+        data = await fetch_rss_news()
+        if company_name:
+            for k in ("signal_items", "general_items", "all_items"):
+                data[k] = [i for i in data.get(k, [])
+                           if _mentions_company(i, company_name)]
+        return data
 
     import asyncio
     nse_task = asyncio.create_task(fetch_market_news(days))
@@ -424,6 +534,11 @@ async def get_market_news(days: int = 7, source: str = "all"):
 
     combined = nse_items + rss_all
     combined.sort(key=lambda x: x.get("date", ""), reverse=True)
+
+    matched_for = None
+    if company_name:
+        combined = [i for i in combined if _mentions_company(i, company_name)]
+        matched_for = company_name
 
     sources_summary = ["NSE"]
     if nse_data.get("status") == "blocked":
@@ -444,6 +559,9 @@ async def get_market_news(days: int = 7, source: str = "all"):
         "from_date": nse_data.get("from_date", ""),
         "to_date": nse_data.get("to_date", ""),
         "total_items": len(combined),
+        # Named so an empty briefing reads as "nothing about this company this
+        # week" rather than "the news feed is broken".
+        "filtered_to_company": matched_for,
     }
 
 
@@ -685,6 +803,10 @@ async def health():
         "ui": "bundled" if _FRONTEND_DIST.exists() else settings.frontend_url,
         "degraded": degraded,
         "sources": sources,
+        # Not a fault - reported so an operator can see the archive actually
+        # growing. A queue drawing on one day of history and one drawing on six
+        # months are very different products and otherwise look identical here.
+        "archive": snapshot_store.stats(),
     }
 
 

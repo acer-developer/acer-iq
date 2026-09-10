@@ -1,10 +1,26 @@
 """
-Financial news from RSS feeds: Economic Times Markets + LiveMint Markets.
+Financial news from RSS feeds.
 
 Fetches, parses, and classifies news items using the same signal-keyword
 engine as NSE corporate announcements.
+
+ROADMAP_V3 phase 3 asks for BusinessLine, Moneycontrol and Business Standard
+here. Probed live before wiring, plain httpx, no headless browser:
+
+  BusinessLine       WORKS    companies and markets feeds, ~60 items each
+  Business Standard  WORKS    companies and markets feeds, ~35 items each
+  Moneycontrol       BLOCKED  every /rss/*.xml route answers HTTP 403 to a
+                              plain client. Not wired: a feed known to fail on
+                              every request would put a permanent red entry in
+                              sources_fail and train people to ignore it.
+
+This is a BRIEFING surface, not a lead source - ROADMAP_V3 is explicit that a
+global news feed does not rank the pipeline. It prepares a call about a company
+someone has already decided to make, which is what `company_name` filtering on
+/api/news is for.
 """
 
+import asyncio
 import re
 import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
@@ -19,6 +35,22 @@ _FEEDS = {
     "LiveMint": {
         "url": "https://www.livemint.com/rss/markets",
         "site": "https://www.livemint.com/market",
+    },
+    "BusinessLine": {
+        "url": "https://www.thehindubusinessline.com/companies/feeder/default.rss",
+        "site": "https://www.thehindubusinessline.com/companies",
+    },
+    "BusinessLine Markets": {
+        "url": "https://www.thehindubusinessline.com/markets/feeder/default.rss",
+        "site": "https://www.thehindubusinessline.com/markets",
+    },
+    "Business Standard": {
+        "url": "https://www.business-standard.com/rss/companies-101.rss",
+        "site": "https://www.business-standard.com/companies",
+    },
+    "Business Standard Markets": {
+        "url": "https://www.business-standard.com/rss/markets-106.rss",
+        "site": "https://www.business-standard.com/markets",
     },
 }
 
@@ -158,17 +190,26 @@ async def fetch_rss_news() -> dict:
     sources_fail = []
 
     async with httpx.AsyncClient(timeout=15, headers=_HEADERS, follow_redirects=True) as client:
-        for name, feed in _FEEDS.items():
-            try:
-                r = await client.get(feed["url"])
-                if r.status_code == 200:
-                    parsed = _parse_feed(r.content, name)
-                    all_items.extend(parsed)
-                    sources_ok.append(name)
-                else:
-                    sources_fail.append(f"{name} (HTTP {r.status_code})")
-            except Exception as e:
-                sources_fail.append(f"{name} ({e})")
+        async def one(name: str, feed: dict):
+            r = await client.get(feed["url"])
+            return name, r
+
+        # Fetched concurrently: six feeds one after another is up to a minute of
+        # worst-case latency on a single request. return_exceptions so one dead
+        # feed cannot take the other five down with it.
+        results = await asyncio.gather(
+            *(one(n, f) for n, f in _FEEDS.items()), return_exceptions=True)
+
+        for (name, feed), res in zip(_FEEDS.items(), results):
+            if isinstance(res, BaseException):
+                sources_fail.append(f"{name} ({res})")
+                continue
+            _, r = res
+            if r.status_code == 200:
+                all_items.extend(_parse_feed(r.content, name))
+                sources_ok.append(name)
+            else:
+                sources_fail.append(f"{name} (HTTP {r.status_code})")
 
     all_items.sort(key=lambda x: x["date"], reverse=True)
 

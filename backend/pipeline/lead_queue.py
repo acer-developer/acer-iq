@@ -34,7 +34,7 @@ from __future__ import annotations
 import asyncio
 import logging
 
-from backend.pipeline import cra_press, winnability
+from backend.pipeline import cra_press, snapshot_store, winnability
 
 log = logging.getLogger(__name__)
 
@@ -148,7 +148,22 @@ async def build_queue(days: int = 30, enrich: int = 15) -> dict:
     # regrouping ~120 rows costs microseconds. A second layer would only add a
     # staleness window with no saving.
     data = await cra_press.fetch_recent_actions(days=days)
-    rows = build_rows(data["actions"])
+
+    # Archive first, then build from live + archive. The feeds are page-1
+    # snapshots, so without this the queue is permanently capped at the last few
+    # weeks no matter what `days` says. Archiving on the ordinary request path is
+    # what makes the history accumulate with no scheduler to run or forget.
+    # Never fatal: a queue that fails because its optional archive failed would
+    # be a worse product than one with a short memory.
+    try:
+        snapshot_store.record_snapshot(data["actions"], data["sources"])
+        actions, archive = snapshot_store.merge_with_archive(data["actions"], days)
+    except Exception:
+        log.warning("lead_queue: snapshot archive unavailable, "
+                    "serving live feed only", exc_info=True)
+        actions, archive = data["actions"], None
+
+    rows = build_rows(actions)
     enriched = await _enrich_coverage(rows, enrich)
     # Enrichment can change scores and block states, so the order is only valid
     # after it has run.
@@ -173,13 +188,17 @@ async def build_queue(days: int = 30, enrich: int = 15) -> dict:
             "agencies_total": len(sources),
             "data_status": data["data_status"],
             "enriched": enriched,
+            "archive": archive,
             # Said in words so the UI cannot quietly drop it.
             "note": ("Built from "
                      + (", ".join(readable) if readable else "no agency")
                      + f" of {len(sources)} CRAs; top {enriched} checked against "
-                       "CARE for full coverage. First-time issuers cannot appear "
-                       "here by construction; agencies that could not be read are "
-                       "listed as blocked."),
+                       "CARE for full coverage."
+                     + (f" {archive['recovered']} older actions recovered from the"
+                        " local archive, which the live feeds no longer carry."
+                        if archive and archive["recovered"] else "")
+                     + " First-time issuers cannot appear here by construction;"
+                       " agencies that could not be read are listed as blocked."),
         },
     }
     return result
