@@ -226,13 +226,32 @@ announcements; sector indices; RSS news; registry of ~12,800 RBI/NSE entities; d
 offices, past instruments; rule-based plus LLM fit scoring; circuit breakers on BSE/NSE;
 frontend with all tabs shipped.
 
-**Half-built:** Signal Radar (spec written, page is a `ComingSoon` placeholder);
-Corporates discovery still served by the OpenStreetMap fallback; search persistence code
-path exists but Supabase is not wired.
+This ledger was stale and is corrected here. Signal Radar is **shipped**, not a
+placeholder (`SignalRadarPage.jsx`, 553 lines), and so are the winnability engine
+and the CRA press-release scrapers.
 
-**Not started:** MCA ingest; the winnability engine; CRA press-release scrapers; renewal
-calendar; ACER as 8th agency; pipeline tracker; auth; always-on host; digest email; pitch
-brief PDF; any financial fundamentals.
+**Shipped since:** winnability engine + credit screen; CRA press scrapers (4 of 7
+readable, 3 blocked by reCAPTCHA / CSRF / RSC and off-limits by policy); ranked
+queue dashboard; saved leads + outcome log; **daily feed archive**
+(`snapshot_store.py`), so the queue is no longer capped at page 1 of each feed;
+**renewal calendar** (`renewal.py`); **maturing-NCD refinance list**
+(`refinance.py`, 353 issuers live); **briefing surface** (per-company news
+filtering, with BusinessLine and Business Standard added).
+
+**Half-built:** Corporates discovery still served by the OpenStreetMap fallback;
+search persistence code path exists but Supabase is not wired. Debt sizing now
+arrives for issuers whose rationale PDF is readable, but not from a fundamentals
+API.
+
+**Deliberately dropped:** the pipeline tracker UI. ACER already runs a CRM, so a
+second pipeline UI here would be a worse copy of it - phase 3 listed one only
+because it assumed no CRM existed. The `/api/leads` backend and its outcome log
+stay. **This leaves the "no feedback loop" non-negotiable open, not solved:**
+without a tab or a CRM write-back, `lead_events` only ever logs `saved`, so the
+winnability weights stay flat. See TODO.md.
+
+**Not started:** MCA ingest; ACER as 8th agency; auth; always-on host; digest
+email; pitch brief PDF; a fundamentals API.
 
 **Coverage gap that matters most:** `credit_history.py` only sees listed companies,
 because NSE disclosures and BSE debt search are its only inputs. Unlisted issuers and

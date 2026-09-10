@@ -10,7 +10,11 @@ Legend: **FREE** = no new spend · **PAID** = costs money · **DECISION** = need
 ## Where this actually stands
 
 **Working end to end:** CRA sites -> scored, ranked, credit-screened queue on
-screen. 4 of 7 agencies readable. 36 tests, four module self-checks, all offline.
+screen. 4 of 7 agencies readable. Plus a renewal calendar, a maturing-debt
+refinance list (353 issuers, the biggest lead source in the app), a growing
+local archive of every feed fetch, and per-company briefing news.
+56 tests, seven module self-checks. All offline except one, which needs an LLM
+key set to pass - see the note at the foot of this file.
 
 **Not done, and honest about why:**
 
@@ -124,15 +128,38 @@ All **FREE**, but real scraping work. Full signal spec:
       about the top 15 unblocked candidates (concurrency 4, depth capped at 40 on
       the endpoint) and rescores them. This is what turned the queue from 0
       workable leads to its first real one.
-- [ ] **Surveillance-date extractor** from rating rationale PDFs → the renewal
-      calendar. Each agency formats differently; likely LLM extraction, covered by
-      the TokenRouter fallback. A warm list built once and mined forever.
+- [x] **Renewal calendar** - built in `backend/pipeline/renewal.py`, served at
+      `GET /api/renewals`. **The premise in this line was wrong, and reading the
+      documents is what showed it:** there is no surveillance date in a rating
+      rationale. On live Brickwork rationales the only occurrence of the word
+      "surveillance" is the boilerplate disclaimer, and there is no validity,
+      expiry or next-review field anywhere in the document. India Ratings'
+      press-release pages render client-side (78 characters of extractable text),
+      so they need a headless browser, which V3 rules out. No LLM can extract a
+      date that is not written, so the TokenRouter fallback was never the blocker.
+      What the rationale *does* carry is better: its facilities table is headed
+      `Previous (19-August-2025)`, the issuer's previous action date. With the
+      current action that gives the issuer's **own measured review interval**,
+      which beats a published date because it is observed rather than assumed.
+      Where no previous date exists, SEBI's at-least-annual rule is the floor.
+      Every row therefore carries `basis` - `observed` vs `annual` - because
+      these are PREDICTED dates and a computed date that looks published is
+      exactly the false precision this codebase keeps refusing to ship.
+      Self-check: `python -m backend.pipeline.renewal`.
 - [x] **Credit screen on top of winnability** - non-negotiable, and enforced:
       `credit_screen()` blocks speculative-grade issuers and anything whose
       sources came back `unverified`. `blocked` and `suppressed` are separate
       states so the UI cannot conflate "must not call yet" with "not worth a call".
-- [ ] **Maturing-NCD refinance window** detector from the BSE scrip master we
-      already cache.
+- [x] **Maturing-NCD refinance window** - built in
+      `backend/pipeline/refinance.py`, served at `GET /api/refinance`. Costs no
+      new network call: the BSE scrip master is already cached 12h for the
+      company search. **Live today: 353 issuers with listed debt maturing inside
+      a 2-year horizon - 123 this year, 161 next** - which is by some distance
+      the largest lead source in the app, against the ranked queue's 54.
+      Maturity resolves to a YEAR, never a date: BSE's master has no maturity
+      date field, so the year is inferred from the scrip id convention. Scrips
+      whose id does not follow it are counted as `unknown_maturity`, never as
+      "nothing due". Self-check: `python -m backend.pipeline.refinance`.
 - [ ] **Merge the signal layer with the `unaccepted-ratings` repo** - both projects
       are solving the same problem twice today.
 - [ ] **Entity resolution** - joining MCA / NSE / BSE / CRA names is genuinely hard.
@@ -156,16 +183,28 @@ cost is dominated by the CARE enrichment (15 leads x 2 calls), not the feeds.
 CARE is held far longer than the feeds because a company's own rating book
 moves on a surveillance cycle, not hourly.
 
-**The `days` parameter filters locally, it does not ask for more history.** These
-feeds are latest-page snapshots, so `days=365` returns the same rows as
-`days=60`. The queue can only ever see roughly the last few weeks of actions.
-Real historical depth would need either per-company crawling or storing each
-day's snapshot, and neither is built.
+**The `days` parameter filters locally, it does not ask for more history.** The
+feeds are latest-page snapshots, so a *live* `days=365` returns the same rows as
+`days=60`. That cap is now lifted from the second direction: every fetch is
+archived to `snapshots.sqlite` and the queue builds from live **union** archive,
+so its depth grows by one day for every day the app is used. It does not
+retroactively reach back - the archive starts the day it starts - so read
+`archive.depth_days` on `/api/health` before trusting a trend.
 
-- [ ] **Persist a daily snapshot of the feeds** - **FREE** - the cheapest route to
-      real history: append each day's actions to Supabase and the queue stops
-      being limited to whatever is on page 1 today. Also the prerequisite for
-      anything trend-shaped ("three withdrawals this quarter").
+- [x] **Daily snapshot of the feeds** - built in
+      `backend/pipeline/snapshot_store.py` on stdlib sqlite3, not Supabase, for
+      the same reason as `pipeline_store.py`: there is no Supabase project, and
+      blocked-on-credentials forever is worse than local now. The row shape is
+      deliberately portable if that changes.
+      `lead_queue.build_queue` archives on every request and then builds from
+      live **union** archive, so history accumulates as a side effect of ordinary
+      use with no scheduler to run or forget, and the queue stops being capped at
+      whatever sits on page 1 today. Re-archiving is idempotent on
+      (agency, company, rating, action, date). Verified against live feeds: with
+      the feeds returning nothing, the queue still had 51 actions from the
+      archive instead of zero. `/api/history` exposes it and `/api/health`
+      reports its depth. Never fatal - an unwritable archive degrades to the live
+      feed and says so. Self-check: `python -m backend.pipeline.snapshot_store`.
 
 ## Phase 3 - Dashboard, logins, saved lists
 
@@ -194,16 +233,34 @@ day's snapshot, and neither is built.
       idempotent server-side, so clicking Add on a company already at Proposal
       will not reset it. `GET/POST /api/leads`, `POST /api/leads/{name}/stage`,
       `DELETE /api/leads/{name}`.
-- [~] **Pipeline tab** - the *backend* is done: stages Identified, Contacted,
-      Meeting, Proposal, Mandated, Lost, plus notes, funnel counts and full event
-      history, all served from `/api/leads`. Unknown stages are refused rather
-      than written. **Still to build: the UI for it.** Today a lead can be saved
-      from the queue, but only moved along the pipeline via the API.
+- [x] **Pipeline tab - deliberately NOT built.** The backend is done and stays:
+      stages Identified, Contacted, Meeting, Proposal, Mandated, Lost, plus notes,
+      funnel counts and full event history at `/api/leads`, unknown stages
+      refused rather than written. The **UI was built and then removed on ACER's
+      instruction: ACER already runs a CRM, and a second pipeline UI inside
+      ACER-IQ would be a worse copy of it.** V3 phase 3 listed a pipeline tracker
+      because it assumed no CRM existed; that assumption was wrong.
+      **The open consequence, stated plainly:** the outcome loop is one of the
+      four premortem non-negotiables, and it closes only if stage transitions get
+      recorded somewhere. With no tab and no CRM write-back, `lead_events` will
+      only ever log `saved`, so the winnability weights stay flat and un-tunable.
+      Either the CRM writes outcomes back into `/api/leads`, or that
+      non-negotiable stays open - it is not closed by dropping the UI.
 - [ ] **De-duplicate leads across searches**, keyed on CIN.
-- [ ] **Briefing surface** - **FREE** - news attached to names already in the
-      pipeline, not a global feed. Add BusinessLine, Moneycontrol and Business
-      Standard to the existing RSS parser. This prepares the call; it does not rank
-      the pipeline.
+- [x] **Briefing surface** - `GET /api/news?company_name=` filters every source
+      to one company, so it prepares a call rather than ranking anything.
+      Matched on the suffix-stripped name (`bse_scraper._norm`) so a feed's
+      "Bajaj Finance" meets a rating action's "Bajaj Finance Ltd.", by substring
+      rather than token overlap - token overlap makes "India Cements" match every
+      headline containing the word India, and two bad matches is all it takes for
+      BD to stop trusting the tool. Feeds probed live before wiring:
+      **BusinessLine works** (companies + markets, ~60 items each),
+      **Business Standard works** (companies + markets, ~35 each),
+      **Moneycontrol is blocked** - every `/rss/*.xml` route answers HTTP 403 to
+      a plain client, so it is deliberately not wired: a feed that fails on every
+      request would put a permanent red entry in `sources_fail` and train people
+      to ignore it. Six feeds now fetch concurrently rather than in series
+      (275 items in 1.6s).
 - [ ] **Add ACER as the 8th agency** so we stop pitching our own clients.
       **Blocked: ACER must provide the rating book. No public source has it.**
 - [ ] ~~Weekly digest email~~ - **PARKED, not cancelled.** Everything it needs (the
