@@ -1,3 +1,7 @@
+> **Superseded.** This is the June 2026 framing: the problem was the data.
+> Kept for history. The current plan is [ROADMAP_V3.md](ROADMAP_V3.md); the
+> three framings side by side are in `roadmap-evolution.html`.
+
 # ACER-IQ — Pain Points, Requirements & Solution Roadmap
 
 > Living document. Created 2026-06-10 after a full code review of the backend pipeline,

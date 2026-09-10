@@ -1,0 +1,46 @@
+{
+  "schema_version": 2,
+  "diagram_type": "workflow",
+  "meta": {
+    "title": "ACER-IQ Roadmap: Three Framings of the Same Problem",
+    "quality_profile": "showcase",
+    "views": [
+      { "id": "v1", "label": "V1 - the data is broken", "focus": ["v1_problem", "v1_solution"], "note": "June 2026: built on the wrong sources, and failing silently." },
+      { "id": "v2", "label": "V2 - we arrive too late", "focus": ["v2_problem", "v2_solution"], "note": "September 2026: the mandate window is short and its triggers are public." },
+      { "id": "v3", "label": "V3 - winning, not finding", "focus": ["v3_problem", "v3_solution", "no_code_levers"], "note": "Current: discovery has no moat, so rank on winnability and start outside the tool." }
+    ]
+  },
+  "lanes": [
+    { "id": "problem", "label": "What we thought the problem was" },
+    { "id": "solution", "label": "What we proposed to build" },
+    { "id": "outside", "label": "Outside the tool", "variant": "exception" }
+  ],
+  "phases": [
+    { "id": "ph_v1", "label": "V1 - Jun 2026", "fromCol": 0, "toCol": 0 },
+    { "id": "ph_v2", "label": "V2 - Sep 2026", "fromCol": 1, "toCol": 1 },
+    { "id": "ph_v3", "label": "V3 - current", "fromCol": 2, "toCol": 2, "variant": "emphasis" }
+  ],
+  "mainPath": ["v1_problem", "v2_problem", "v3_problem"],
+  "nodes": [
+    { "id": "v1_problem", "lane": "problem", "col": 0, "type": "security", "width": 176, "label": "The data is broken", "sublabel": "OSM leads, silent failures", "tag": "framing" },
+    { "id": "v2_problem", "lane": "problem", "col": 1, "type": "security", "width": 176, "label": "We arrive too late", "sublabel": "2-6 week mandate window", "tag": "framing" },
+    { "id": "v3_problem", "lane": "problem", "col": 2, "type": "security", "width": 176, "label": "Winning, not finding", "sublabel": "BD calling hours are scarce", "tag": "framing" },
+    { "id": "v1_solution", "lane": "solution", "col": 0, "type": "database", "width": 176, "label": "Real registries", "sublabel": "and surface every error", "tag": "still true" },
+    { "id": "v2_solution", "lane": "solution", "col": 1, "type": "backend", "width": 176, "label": "Signal engine", "sublabel": "filings, downgrades, dates", "tag": "now an input" },
+    { "id": "v3_solution", "lane": "solution", "col": 2, "type": "cloud", "width": 176, "label": "Winnability ranking", "sublabel": "four flags, credit screened", "tag": "the tool" },
+    { "id": "no_code_levers", "lane": "outside", "col": 2, "type": "external", "width": 176, "label": "Empanelment, churn", "sublabel": "panels first, then retention", "tag": "higher leverage" }
+  ],
+  "edges": [
+    { "from": "v1_problem", "to": "v1_solution", "label": "rebuild the sources" },
+    { "from": "v1_problem", "to": "v2_problem", "label": "reframed", "variant": "emphasis" },
+    { "from": "v2_problem", "to": "v2_solution", "label": "monitor the triggers" },
+    { "from": "v2_problem", "to": "v3_problem", "label": "reframed again", "variant": "emphasis" },
+    { "from": "v3_problem", "to": "v3_solution", "label": "rank, then screen" },
+    { "from": "v3_solution", "to": "no_code_levers", "label": "do these first", "variant": "security", "role": "branch" }
+  ],
+  "cards": [
+    { "dot": "emerald", "title": "What every version kept", "items": ["V1's rule that a tool silently showing incomplete data is worse than no tool", "V1's move off OpenStreetMap onto real registries", "V2's trigger monitoring, now one input to a score rather than the product itself"] },
+    { "dot": "violet", "title": "What each reframe narrowed", "items": ["V1 asked whether the data was trustworthy", "V2 asked whether we saw the opportunity in time", "V3 asks whether we could have won it at all"] },
+    { "dot": "amber", "title": "Why V3 starts outside the code", "items": ["If ACER is not on a bank's approved panel, the bank cannot pick ACER", "Keeping an existing rating client costs less than winning a new one", "Both audits run on data ACER already holds, with no software to build"] }
+  ]
+}

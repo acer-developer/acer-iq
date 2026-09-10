@@ -27,6 +27,8 @@ from backend.pipeline.bse_scraper import bse_health_check, fetch_past_instrument
 from backend.pipeline.office_locator import find_office_locations
 from backend.pipeline.credit_history import fetch_credit_history
 from backend.pipeline.fit_analyzer import analyze_fit
+from backend.pipeline import winnability as winnability_scorer
+from backend.pipeline.lead_queue import build_queue
 from backend.pipeline.market_news import fetch_market_news
 from backend.pipeline.rss_news import fetch_rss_news
 from backend.pipeline.sector_indices import fetch_sector_indices
@@ -276,6 +278,32 @@ async def search_leads(req: SearchRequest):
     )
 
 
+# ── Ranked lead queue (ROADMAP_V3 lever 3) ───────────────────────────────────
+
+@app.get("/api/queue")
+async def get_queue(days: int = 30, enrich: int = 15):
+    """The winnability-ranked queue the dashboard renders.
+
+    Degrades rather than 500s: if every CRA source is unreachable the queue comes
+    back empty with `coverage` saying so, which is a different and honest answer
+    from "no leads". The caller must render the difference."""
+    if days < 1 or days > 365:
+        raise HTTPException(status_code=400, detail="days must be between 1 and 365")
+    # Each enriched lead costs two CARE calls, so the depth is capped rather
+    # than left to the caller — an unbounded value would let one request
+    # hammer CARE and stall the page.
+    enrich = max(0, min(enrich, 40))
+
+    _failures.set(Counter())
+    empty = {"leads": [], "total": 0, "workable": 0, "blocked": 0,
+             "window_days": days,
+             "coverage": {"sources": {}, "agencies_read": [], "agencies_total": 0,
+                          "data_status": "unverified",
+                          "note": "Queue could not be built — no CRA source answered."}}
+    data = await _safe(build_queue(days=days, enrich=enrich), empty, "cra_press")
+    return {**data, "sources": _source_status(1)}
+
+
 # ── Sector Indices (Signal Radar) ────────────────────────────────────────────
 
 @app.get("/api/sectors")
@@ -445,10 +473,16 @@ async def company_credit(req: CompanyCreditRequest):
         "already_rated_by_infomerics": False,
     }, "fit_analysis")
 
+    # Winnability — can we realistically win this, not merely does it need a
+    # rating (ROADMAP_V3 lever 3). Pure function over credit_data, no I/O, so it
+    # cannot fail the request; it stays outside _safe deliberately.
+    win = winnability_scorer.score(company_info, credit_data)
+
     return {
         "company": company_info,
         "credit_data": credit_data,
         "fit_analysis": fit,
+        "winnability": win,
         "sources": _source_status(1),
     }
 

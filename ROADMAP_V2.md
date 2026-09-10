@@ -1,3 +1,8 @@
+> **Superseded.** This is the early-September 2026 framing: the problem was
+> arriving too late. Kept for history. The current plan is
+> [ROADMAP_V3.md](ROADMAP_V3.md); the three framings side by side are in
+> `roadmap-evolution.html`.
+
 # ACER-IQ Roadmap V2
 
 ## What this tool does
@@ -79,7 +84,8 @@ CRM-lite tracker so leads from other tabs do not die in a spreadsheet.
 ## Known challenges
 
 1. **BSE/NSE APIs break often.** Already have circuit breakers but need visible "last refreshed" timestamps.
-2. **MCA data access costs money.** Bulk company master download is not free.
+2. ~~**MCA data access costs money.**~~ **Wrong.** The company master is free on
+   data.gov.in, per Registrar of Companies. Corrected in V3.
 3. **Rating rationale PDFs are unstructured.** Each CRA formats differently. Extracting surveillance dates needs PDF parsing and possibly LLM extraction.
 4. **ACER's own data must come from ACER.** No public source has the complete internal rating book.
 5. **Contact info for Indian mid-caps is hard.** Hunter.io does not work well for Indian SMEs. BSE CorpInfo has some directors but not always CFO emails.
@@ -94,6 +100,6 @@ CRM-lite tracker so leads from other tabs do not die in a spreadsheet.
 | NSE corporate announcements | Market news, rating actions | Free API (needs cookie warmup) |
 | BSE debt search | Past instruments, rating history | Free API (rate limited) |
 | BSE CorpInfo | Directors, CIN, listing info | Free API |
-| MCA company master | Corporate segment registry | Paid or incremental scrape |
+| MCA company master | Corporate segment registry | **Free** - data.gov.in |
 | CRA press releases | Rating withdrawals, surveillance dates | Free, needs per-CRA scraper |
 | ACER internal database | ACER's own ratings | Internal, ACER must provide |

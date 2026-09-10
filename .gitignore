@@ -35,3 +35,6 @@ __pycache__
 *.xlsx
 *.csv
 .venv/
+
+# archify visual-check artifacts (regenerated on demand)
+*.visual-check.*

@@ -6,6 +6,7 @@ import asyncio
 from collections import Counter
 
 from backend import main
+from backend.pipeline import winnability, lead_queue
 
 
 async def _boom():
@@ -188,6 +189,143 @@ def test_health_is_not_on_the_root_path():
     """Liveness lives at /api/health so "/" stays free to serve the UI."""
     paths = {getattr(r, "path", "") for r in main.app.routes}
     assert "/api/health" in paths
+
+
+# ── Winnability (ROADMAP_V3 lever 3) ─────────────────────────────────────────
+
+def test_unverified_sources_never_look_like_a_first_timer():
+    """The whole point of data_status: absence of ratings is not evidence."""
+    blind = {"rated_by_count": 0, "data_status": "unverified",
+             "agencies": [], "rating_actions": []}
+    r = winnability.score({}, blind)
+    assert r["flags"]["first_timer"] is False
+    assert r["blocked"] is True, "unverified credit must not reach BD"
+
+
+def test_agency_forced_withdrawal_is_not_a_buy_signal():
+    """Only a withdrawal the ISSUER asked for means they are shopping."""
+    forced = {"rated_by_count": 1, "data_status": "ok", "agencies": [],
+              "rating_actions": [{"action": "Withdrawn due to non-cooperation",
+                                  "rating": "CARE BBB"}]}
+    assert winnability.score({}, forced)["flags"]["self_withdrawn"] is False
+
+
+def test_distressed_issuer_is_blocked_not_suppressed():
+    """Adverse selection guard: winnable on paper, still must not be called."""
+    distressed = {
+        "rated_by_count": 1, "data_status": "ok",
+        "agencies": [{"instruments": [{"rating": "CRISIL D", "status": "Downgraded"}]}],
+        "rating_actions": [{"action": "Issuer not cooperating", "rating": "CRISIL D"}],
+    }
+    r = winnability.score({}, distressed)
+    assert r["blocked"] is True and r["suppressed"] is False
+
+
+def test_company_credit_response_carries_winnability():
+    import inspect
+    src = inspect.getsource(main.company_credit)
+    assert '"winnability": win' in src
+
+
+# ── Lead queue (ROADMAP_V3 phase 3) ──────────────────────────────────────────
+
+def test_queue_merges_name_variants_of_one_issuer():
+    """Two spellings must not become two leads, or two people call one company."""
+    rows = lead_queue.build_rows([
+        {"agency": "ACUITE", "company_name": "Spectron Engineers Private Limited",
+         "rating": "ACUITE BBB", "action": "Reaffirmed", "date": "09-09-2026"},
+        {"agency": "BRICKWORK", "company_name": "SPECTRON ENGINEERS PVT LTD",
+         "rating": "BWR BBB", "action": "Reaffirmed", "date": "01-09-2026"},
+    ])
+    assert len(rows) == 1 and rows[0]["action_count"] == 2, rows
+
+
+def test_queue_never_reports_a_first_timer():
+    """A company only reaches this queue by having a published action, so it
+    cannot be an unrated first-time issuer. Guards against a future weight
+    change quietly inventing them."""
+    rows = lead_queue.build_rows([
+        {"agency": "ACUITE", "company_name": "Anyone Ltd", "rating": "ACUITE A",
+         "action": "Assigned", "date": "09-09-2026"},
+    ])
+    assert not any(r["flags"]["first_timer"] for r in rows)
+
+
+def test_queue_sinks_blocked_leads_below_workable_ones():
+    """The queue is worked top-down, so an uncallable lead must never head it."""
+    rows = lead_queue.build_rows([
+        {"agency": "ACUITE", "company_name": "Distressed Ltd", "rating": "ACUITE D",
+         "action": "Issuer not cooperating", "date": "09-09-2026"},
+        {"agency": "ACUITE", "company_name": "Healthy Ltd", "rating": "ACUITE AA",
+         "action": "Reaffirmed", "date": "08-09-2026"},
+    ])
+    assert rows[-1]["company_name"] == "Distressed Ltd" and rows[-1]["blocked"]
+
+
+def test_queue_endpoint_exists_and_rejects_a_silly_window():
+    paths = {getattr(r, "path", "") for r in main.app.routes}
+    assert "/api/queue" in paths
+    import inspect
+    assert "days must be between 1 and 365" in inspect.getsource(main.get_queue)
+
+
+# ── Credit-screen grade boundaries ───────────────────────────────────────────
+
+def _rating(r):
+    return {"rated_by_count": 1, "data_status": "ok", "agencies": [],
+            "rating_actions": [{"action": "x", "rating": r}]}
+
+
+def test_investment_grade_is_not_read_as_speculative():
+    """BBB must never match the B/BB rules. Getting this wrong would block every
+    investment-grade issuer in the queue and leave nothing callable."""
+    for r in ["CARE BBB; Stable", "ACUITE BBB+", "IND BBB-", "CARE AAA", "CARE A1+"]:
+        assert winnability.credit_screen(_rating(r))["pass"] is True, r
+
+
+def test_speculative_grades_are_caught():
+    for r in ["ACUITE D", "BWR BB", "IND B+", "ACUITE C"]:
+        assert winnability.credit_screen(_rating(r))["pass"] is False, r
+
+
+# ── India Ratings title parsing ──────────────────────────────────────────────
+
+def test_indra_rating_keeps_its_modifier():
+    """'IND BB+' must not degrade to 'IND BB' — a lost +/- moves the grade."""
+    from backend.pipeline.cra_press import parse_indra_json
+    rows = [{"issuerName": "X Ltd", "pressReleaseID": 1, "prDate": "Sep 10, 2026",
+             "pressReleaseTitle": "India Ratings Affirms X at 'IND BB+'/Stable"}]
+    assert parse_indra_json(rows)[0]["rating"] == "IND BB+"
+
+
+def test_indra_non_cooperation_becomes_an_inc_action():
+    from backend.pipeline.cra_press import parse_indra_json
+    rows = [{"issuerName": "Y Ltd", "pressReleaseID": 2, "prDate": "Jan 02, 2026",
+             "pressReleaseTitle": "India Ratings Migrates Y to Non-Cooperating Category"}]
+    assert parse_indra_json(rows)[0]["action"] == "Issuer Not Cooperating"
+
+
+def test_care_never_invents_a_date():
+    """CARE's payload has no date. A fabricated one would drop a stale rating
+    inside a 'last 30 days' window and make it look like fresh news."""
+    from backend.pipeline.cra_press import parse_care_ratings
+    out = parse_care_ratings({"data": [{"Company": "Z Ltd", "CompanyInstrument": [
+        {"Instrument": "Term Loan", "Rating": "CARE BBB; Stable"}]}]})
+    assert out[0]["date"] == "" and out[0]["action"] == "Current rating"
+
+
+def test_care_lookup_refuses_a_different_company():
+    """CARE's autocomplete is a substring search, so it will happily return a
+    different company with a similar name. Attaching another company's rating —
+    or another company's default — to a lead someone is about to call is the
+    worst error this module can make."""
+    from backend.pipeline.cra_press import _care_match
+    assert _care_match("Berar Finance Ltd", "Berar Finance Limited") is True
+    assert _care_match("Adani Agri Fresh", "Adani Agri Fresh Limited") is True
+    assert _care_match("Arka Eduserve Private Limited",
+                       "Arka Educational & Cultural Trust") is False
+    assert _care_match("Tata Motors Limited", "Tata Steel Limited") is False
+    assert _care_match("", "Anything Ltd") is False
 
 
 if __name__ == "__main__":

@@ -6,6 +6,7 @@ import CompanyCard from "./components/CompanyCard.jsx";
 import CompanyResearchPage from "./components/company/CompanyResearchPage.jsx";
 import MarketNewsPage from "./components/MarketNewsPage.jsx";
 import SignalRadarPage from "./components/SignalRadarPage.jsx";
+import QueuePage from "./components/QueuePage.jsx";
 import ComingSoon from "./components/ComingSoon.jsx";
 import SourceHealth from "./components/SourceHealth.jsx";
 import { apiUrl } from "./lib/api.js";
@@ -13,6 +14,7 @@ import { apiUrl } from "./lib/api.js";
 const MAPS_API_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY ?? "";
 
 const TAB_INFO = {
+  queue: "One ranked list, highest winnability first. Winnability is not need — every CRA sees the same downgrade at the same hour. It asks whether ACER can realistically win the mandate: first-time borrowers, issuers tagged Issuer Not Cooperating, self-withdrawn ratings, and proven multi-CRA shoppers. A credit screen sits on top and can block a lead outright — that is different from a lead simply being low winnability.",
   radar: "Monitors public signals that indicate a company needs a credit rating soon: NCD/bond board approvals, rating withdrawals, surveillance renewals, and bank loan rating expirations. Signals come from BSE/NSE exchange filings and CRA press releases.",
   news: "Tracks corporate announcements from NSE that signal upcoming funding needs: expansion plans, capex approvals, fund raising resolutions, acquisitions, and rating actions. Every item is a real exchange filing, not a prediction.",
   research: "Look up any Indian company to see its credit rating history across all SEBI-registered agencies. Shows which agencies currently rate the company and identifies opportunities for ACER: first-time mandates, second opinions, or renewals.",
@@ -58,6 +60,12 @@ function InfoButton({ tabId }) {
 
 function TabBar({ active, onChange }) {
   const tabs = [
+    { id: "queue", icon: (
+      <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+        <path strokeLinecap="round" strokeLinejoin="round"
+          d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5" />
+      </svg>
+    ), label: "Ranked Queue" },
     { id: "radar", icon: (
       <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
         <path strokeLinecap="round" strokeLinejoin="round"
@@ -111,7 +119,7 @@ function TabBar({ active, onChange }) {
 }
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState("news");
+  const [activeTab, setActiveTab] = useState("queue");
 
   // Find Leads (directory) state
   const [companies, setCompanies] = useState([]);
@@ -234,6 +242,11 @@ export default function App() {
 
       {/* Tabs */}
       <TabBar active={activeTab} onChange={(t) => { setActiveTab(t); setError(""); }} />
+
+      {/* Ranked Queue (live, default) */}
+      {activeTab === "queue" && (
+        <QueuePage />
+      )}
 
       {/* Signal Radar (live) */}
       {activeTab === "radar" && (
