@@ -11,14 +11,15 @@ Legend: **FREE** = no new spend - **PAID** = costs money - **DECISION** = needs 
 
 **Working end to end:** CRA sites -> scored, ranked, credit-screened queue on
 screen; saved leads and a pipeline with stages and outcome history; a
-forward-looking refinance window. 4 of 7 agencies readable. 48 tests, seven
-module self-checks, all offline.
+forward-looking refinance window; filed financials with interest coverage.
+4 of 7 agencies readable. 53 tests, eight module self-checks, all offline.
 
 **The live numbers, so nothing is oversold:**
 
 | Surface | Today |
 |---|---|
 | Ranked queue | 54 leads, 0 workable, 24 blocked |
+| Fundamentals | 2,126 NSE symbols with filed financials |
 | Refinance window (9 months) | **282 candidates**, real NBFCs |
 | Archive depth | 82 actions, collecting since 2026-09-11 |
 
@@ -36,7 +37,6 @@ grade names rather than the sub-investment-grade MSME paper the CRA feeds carry.
 | Logins (per-user lists) | a Supabase project. **There isn't one** - every `.env` still has the README's `your_url_here`. Saved leads run on SQLite as one shared team list. |
 | Renewal calendar (surveillance dates) | rationale-PDF parsing per agency. Multi-session. |
 | MCA first-timer join | bulk registry ingest + geocoding. Multi-session. |
-| Fundamentals for sizing | a free Twelve Data or Alpha Vantage API key. Both require a signup. |
 | Always-on hosting | your call: Oracle Cloud Always Free, or ~$7/mo. |
 | Outcome-driven scoring weights | months of outcome data. The logging now exists to collect it. |
 
@@ -261,11 +261,20 @@ day's snapshot, and neither is built.
       - [ ] Keep OSM as a fallback only, and label the source in the response
 - [ ] **Automate the monthly registry refresh** - **FREE** - currently a manual CLI
       run, so the registry silently ages.
-- [ ] **Fundamentals for sizing** - **FREE tier** - Twelve Data (800 req/day, NSE
-      coverage) or Alpha Vantage (`.BSE` symbols) into `fit_analyzer.py`, which today
-      scores on entity type, CIN and instrument count with zero financials. Adds debt
-      quantum and interest coverage, so a Rs 5,000 cr borrower stops looking like a
-      Rs 50 cr one.
+- [x] **Fundamentals for sizing** - built, but **not** on the API I recommended.
+      Both free tiers were tested with live keys and neither covers India:
+      Twelve Data Basic 403s on `/income_statement`, `/balance_sheet` and
+      `/statistics` (even an NSE quote needs the paid Grow plan), and Alpha
+      Vantage returns an empty object for `RELIANCE.BSE`, `MUTHOOTFIN.BSE` and
+      `500325.BSE` while `IBM` returns full data - their global coverage is price
+      data, fundamentals are US-only.
+      `backend/pipeline/fundamentals.py` reads NSE's own Ind-AS XBRL filings
+      instead: free, no key, better provenance, and it reuses the cookie-warmed
+      NSE client. **2,126 symbols indexed.** Live: Reliance 5.0x interest
+      coverage, Muthoot Fincorp 2.01x, Bajaj Finance 1.9x, Satin Creditcare 1.28x.
+      `GET /api/fundamentals/{symbol}`, and attached to `/api/company-credit`.
+      Window default is 730 days deliberately - 180 days indexed only 7 symbols
+      and looked like the endpoint was gated. Do not shrink it back.
 - [ ] **Pitch-brief PDF export** - one page per company for meetings.
 
 ## Known gaps we are accepting for now

@@ -31,6 +31,7 @@ from backend.pipeline import winnability as winnability_scorer
 from backend.pipeline.lead_queue import build_queue
 from backend.pipeline import pipeline_store
 from backend.pipeline.refinance import find_refinance_candidates
+from backend.pipeline.fundamentals import fetch_for_symbol as fetch_fundamentals
 from backend.pipeline.market_news import fetch_market_news
 from backend.pipeline.rss_news import fetch_rss_news
 from backend.pipeline.sector_indices import fetch_sector_indices
@@ -89,6 +90,7 @@ _SOURCE_NAMES = {
     "mca":             "MCA/Zauba",
     "credit_history":  "Rating history",
     "fit_analysis":    "AI fit analysis",
+    "fundamentals":    "NSE financials",
     "scoring":         "Lead scoring",
     "google_places":   "Google Places",
 }
@@ -334,6 +336,19 @@ async def get_queue(days: int = 30, enrich: int = 15):
                           "note": "Queue could not be built - no CRA source answered."}}
     data = await _safe(build_queue(days=days, enrich=enrich), empty, "cra_press")
     return {**data, "sources": _source_status(1)}
+
+
+# ── Fundamentals: size the opportunity ───────────────────────────────────────
+
+@app.get("/api/fundamentals/{symbol}")
+async def get_fundamentals(symbol: str):
+    """Filed financials for one NSE symbol, with interest coverage.
+
+    From NSE's own Ind-AS XBRL rather than a data vendor: both free commercial
+    tiers were tested with live keys and neither covers India (see the
+    fundamentals module docstring)."""
+    return await _safe(fetch_fundamentals(symbol),
+                       {"status": "unverified", "symbol": symbol}, "fundamentals")
 
 
 # ── Refinance window: bonds maturing soon ────────────────────────────────────
@@ -589,11 +604,20 @@ async def company_credit(req: CompanyCreditRequest):
     # cannot fail the request; it stays outside _safe deliberately.
     win = winnability_scorer.score(company_info, credit_data)
 
+    # Filed financials, when the company is NSE-listed and has filed. Sizing was
+    # the gap: the fit score knows entity type and instrument count but nothing
+    # about how much debt is actually being serviced.
+    fundamentals = await _safe(
+        fetch_fundamentals(company_info.get("symbol", "")),
+        {"status": "not_filed"}, "fundamentals",
+    ) if company_info.get("symbol") else {"status": "not_listed"}
+
     return {
         "company": company_info,
         "credit_data": credit_data,
         "fit_analysis": fit,
         "winnability": win,
+        "fundamentals": fundamentals,
         "sources": _source_status(1),
     }
 

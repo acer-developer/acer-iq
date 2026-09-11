@@ -585,6 +585,50 @@ def test_refinance_endpoint_exists_and_bounds_its_window():
     assert "months must be between 1 and 36" in inspect.getsource(main.get_refinance)
 
 
+# -- Fundamentals from NSE XBRL ----------------------------------------------
+
+def test_fundamentals_never_invent_a_missing_figure():
+    """A filing that omits a line item must yield None, never zero. Zero finance
+    costs would compute as infinite interest coverage and flatter a bad
+    borrower - the opposite of what a credit screen is for."""
+    from backend.pipeline.fundamentals import parse_xbrl, summarise
+    bare = parse_xbrl("<xbrl></xbrl>")
+    assert bare["revenue"] is None and bare["finance_costs"] is None
+    assert bare["ebit"] is None and bare["interest_coverage"] is None
+    assert "unavailable" in summarise(bare)["verdict"]
+
+
+def test_zero_finance_costs_is_not_infinite_coverage():
+    from backend.pipeline.fundamentals import parse_xbrl
+    f = parse_xbrl('<xbrl xmlns:a="x"><a:FinanceCosts>0</a:FinanceCosts>'
+                   '<a:ProfitBeforeTax>100</a:ProfitBeforeTax></xbrl>')
+    assert f["interest_coverage"] is None
+
+
+def test_ebit_is_derived_because_no_filing_states_it():
+    """EBIT = PBT + finance costs. Without this, interest coverage - the one
+    metric worth having here - cannot be computed at all."""
+    from backend.pipeline.fundamentals import parse_xbrl
+    f = parse_xbrl('<xbrl xmlns:a="x"><a:FinanceCosts>100</a:FinanceCosts>'
+                   '<a:ProfitBeforeTax>400</a:ProfitBeforeTax></xbrl>')
+    assert f["ebit"] == 500 and f["interest_coverage"] == 5.0
+
+
+def test_filing_dates_compare_chronologically_not_as_text():
+    """'24-Aug-2026' sorts BEFORE '24-Dec-2025' as text, which would pin a stale
+    filing as the newest one."""
+    from backend.pipeline.fundamentals import _filed_at
+    from datetime import datetime
+    assert "24-Aug-2026" < "24-Dec-2025"        # the trap
+    assert _filed_at({"filingDate": "24-Aug-2026 17:39"}) >            _filed_at({"filingDate": "24-Dec-2025 09:00"})
+    assert _filed_at({"filingDate": "nonsense"}) == datetime.min
+
+
+def test_fundamentals_route_exists():
+    paths = {getattr(r, "path", "") for r in main.app.routes}
+    assert "/api/fundamentals/{symbol}" in paths
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("test_"):
