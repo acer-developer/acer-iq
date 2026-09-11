@@ -1,0 +1,45 @@
+{
+  "_comment": "ACER's own rating book. Update this when ACER publishes a press release at https://acerratings.com/media-press - the site 403s plain HTTP (WAF), so it cannot be scraped. Surveillance is annual, so next_surveillance is action_date + 1 year unless the rationale says otherwise.",
+  "_last_updated": "2026-09-11",
+  "_source": "https://acerratings.com/media-press",
+  "actions": [
+    {
+      "company_name": "Finstars Capital Limited",
+      "rating": "ACER BBB- (Stable)",
+      "action": "Assigned",
+      "date": "17-06-2026",
+      "instrument_type": "Non Convertible Debentures",
+      "amount_crores": "55.00",
+      "isins": [
+        "INE08XA07029",
+        "INE08XA07037",
+        "INE08XA07045",
+        "INE08XA07052"
+      ],
+      "source_url": "https://acerratings.com/pdf-viewer/press-release/5"
+    },
+    {
+      "company_name": "Viviana Power Tech Limited",
+      "rating": "ACER BBB (Stable)",
+      "action": "Reaffirmed",
+      "date": "24-08-2026",
+      "instrument_type": "Non-Convertible Debenture",
+      "amount_crores": "100.00",
+      "isins": [
+        "INE0MEG07011",
+        "INE0MEG07029"
+      ],
+      "source_url": "https://acerratings.com/pdf-viewer/press-release/7"
+    },
+    {
+      "company_name": "Viviana Power Tech Limited",
+      "rating": "ACER BBB (Stable)",
+      "action": "Assigned",
+      "date": "06-03-2026",
+      "instrument_type": "Non Convertible Debentures",
+      "amount_crores": "100.00",
+      "isins": [],
+      "source_url": "https://acerratings.com/pdf-viewer/press-release/4"
+    }
+  ]
+}

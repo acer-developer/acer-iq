@@ -32,6 +32,7 @@ from backend.pipeline.lead_queue import build_queue
 from backend.pipeline import pipeline_store
 from backend.pipeline.refinance import find_refinance_candidates
 from backend.pipeline.fundamentals import fetch_for_symbol as fetch_fundamentals
+from backend.pipeline import acer_book
 from backend.pipeline.market_news import fetch_market_news
 from backend.pipeline.rss_news import fetch_rss_news
 from backend.pipeline.sector_indices import fetch_sector_indices
@@ -336,6 +337,25 @@ async def get_queue(days: int = 30, enrich: int = 15):
                           "note": "Queue could not be built - no CRA source answered."}}
     data = await _safe(build_queue(days=days, enrich=enrich), empty, "cra_press")
     return {**data, "sources": _source_status(1)}
+
+
+# ── ACER's own book: renewals, and never pitching our own clients ────────────
+
+@app.get("/api/renewals")
+async def get_renewals(days: int = 90):
+    """ACER clients whose annual surveillance falls due inside the window.
+
+    The cheapest revenue in the business and nobody was tracking it. Also
+    reports how stale the underlying file is: acerratings.com 403s plain HTTP,
+    so the book is hand-maintained and a forgotten file would quietly stop
+    recognising new clients."""
+    if days < 1 or days > 730:
+        raise HTTPException(status_code=400, detail="days must be between 1 and 730")
+    return {
+        "renewals": acer_book.renewals(within_days=days),
+        "window_days": days,
+        "book": acer_book.staleness(),
+    }
 
 
 # ── Fundamentals: size the opportunity ───────────────────────────────────────

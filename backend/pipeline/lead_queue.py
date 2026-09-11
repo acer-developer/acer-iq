@@ -34,7 +34,7 @@ from __future__ import annotations
 import asyncio
 import logging
 
-from backend.pipeline import action_history, cra_press, winnability
+from backend.pipeline import acer_book, action_history, cra_press, winnability
 
 log = logging.getLogger(__name__)
 
@@ -79,8 +79,15 @@ def build_rows(actions: list[dict]) -> list[dict]:
         if key:
             grouped.setdefault(key, []).append(act)
 
+    # ACER's own clients must never appear as leads. Cold-calling a company we
+    # already rate is the most embarrassing failure this tool can produce, and
+    # it costs one set lookup to prevent.
+    our_clients = acer_book.client_names()
+
     rows = []
     for key, acts in grouped.items():
+        if key in our_clients:
+            continue
         credit_data = _credit_data_for(acts)
         verdict = winnability.score({"name": key}, credit_data)
         newest = _latest(acts)
@@ -181,6 +188,7 @@ async def build_queue(days: int = 30, enrich: int = 15) -> dict:
             "data_status": data["data_status"],
             "enriched": enriched,
             "history": action_history.stats() | {"new_this_build": new_rows},
+            "acer_clients_excluded": sorted(acer_book.client_names()),
             # Said in words so the UI cannot quietly drop it.
             "note": ("Built from "
                      + (", ".join(readable) if readable else "no agency")

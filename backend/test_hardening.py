@@ -509,12 +509,20 @@ def test_lead_routes_are_registered_and_events_is_not_a_company_name():
 
 # -- Search persistence falls back to SQLite (no Supabase project) ------------
 
-def test_search_store_works_without_supabase():
-    """The whole point: a restart must not start 404-ing CSV exports. Supabase
-    was never set up, so SQLite has to carry this."""
+def test_search_store_always_resolves_to_a_real_backend():
+    """A restart must not start 404-ing CSV exports, whichever store is live.
+
+    This used to assert supabase_configured() is False, which baked "there is no
+    Supabase project" into a test as though it were permanent. A project now
+    exists and the test broke - so it now pins the invariant that actually
+    matters: there is always a working store, named honestly."""
     from backend import database
-    assert database.supabase_configured() is False
-    assert database.backend_name() == "sqlite"
+    assert database.backend_name() in {"sqlite", "supabase"}
+    # Configured or not, a round trip must succeed - Supabase errors fall
+    # through to SQLite rather than losing the search.
+    database.save_search("test-roundtrip", "Chennai", "NBFC", [{"name": "Y Ltd"}])
+    row = database.load_search("test-roundtrip")
+    assert row and row["city"] == "Chennai", row
 
 
 def test_health_names_the_search_store_in_use():
@@ -627,6 +635,58 @@ def test_filing_dates_compare_chronologically_not_as_text():
 def test_fundamentals_route_exists():
     paths = {getattr(r, "path", "") for r in main.app.routes}
     assert "/api/fundamentals/{symbol}" in paths
+
+
+# -- ACER's own book: the 8th agency ------------------------------------------
+
+def test_our_own_clients_never_appear_as_leads():
+    """Cold-calling a company ACER already rates is the most embarrassing
+    failure this tool can produce. One set lookup prevents it."""
+    from backend.pipeline.lead_queue import build_rows
+    rows = build_rows([
+        {"agency": "ACUITE", "company_name": "Viviana Power Tech Ltd",
+         "rating": "ACUITE A", "action": "Reaffirmed", "date": "01-09-2026"},
+        {"agency": "ACUITE", "company_name": "Some Other Co Limited",
+         "rating": "ACUITE A", "action": "Reaffirmed", "date": "01-09-2026"},
+    ])
+    names = [r["company_name"] for r in rows]
+    assert not any("Viviana" in n for n in names), names
+    assert names == ["Some Other Co Limited"], names
+
+
+def test_client_matching_survives_suffix_variants():
+    from backend.pipeline import acer_book
+    assert acer_book.is_client("Viviana Power Tech Limited")
+    assert acer_book.is_client("VIVIANA POWER TECH LTD")
+    assert acer_book.is_client("Finstars Capital Limited")
+    assert not acer_book.is_client("Viviana Solar Private Limited")
+
+
+def test_renewal_uses_the_latest_action_not_the_first():
+    """Viviana was assigned in March and reaffirmed in August. Dating the review
+    off the March action would raise the renewal alarm five months early."""
+    from backend.pipeline import acer_book
+    rs = acer_book.renewals(within_days=10_000)
+    viviana = next(r for r in rs if "Viviana" in r["company_name"])
+    assert viviana["last_action_date"] == "24-08-2026", viviana
+    assert len(rs) == 2, "two issuers, not three actions"
+
+
+def test_renewals_route_exists():
+    paths = {getattr(r, "path", "") for r in main.app.routes}
+    assert "/api/renewals" in paths
+
+
+# -- Supabase degradation -----------------------------------------------------
+
+def test_search_store_survives_supabase_without_tables():
+    """Supabase is configured but its tables do not exist yet. That must log and
+    fall through to SQLite, not lose the search - a lost search is a 404 at
+    whoever was about to download the CSV."""
+    from backend import database
+    database.save_search("test-degrade", "Mumbai", "NBFC", [{"name": "X Ltd"}])
+    row = database.load_search("test-degrade")
+    assert row and row["city"] == "Mumbai", row
 
 
 if __name__ == "__main__":

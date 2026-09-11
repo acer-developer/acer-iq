@@ -22,6 +22,7 @@ forward-looking refinance window; filed financials with interest coverage.
 | Fundamentals | 2,126 NSE symbols with filed financials |
 | Refinance window (9 months) | **282 candidates**, real NBFCs |
 | Archive depth | 82 actions, collecting since 2026-09-11 |
+| ACER's own book | 2 clients, 3 actions, both renewing mid-2027 |
 
 The queue reads 0 workable today and that is not a regression: yesterday's one
 winnable lead rolled off Ind-Ra's ten-item feed before the archive existed to
@@ -34,7 +35,7 @@ grade names rather than the sub-investment-grade MSME paper the CRA feeds carry.
 
 | Gap | Blocked on |
 |---|---|
-| Logins (per-user lists) | a Supabase project. **There isn't one** - every `.env` still has the README's `your_url_here`. Saved leads run on SQLite as one shared team list. |
+| Logins (per-user lists) | **the schema being applied.** A Supabase project now exists and the credentials are wired; run `supabase_schema.sql` in the SQL editor, then tell me. Until then saved leads stay on SQLite as one shared team list. |
 | Renewal calendar (surveillance dates) | rationale-PDF parsing per agency. Multi-session. |
 | MCA first-timer join | bulk registry ingest + geocoding. Multi-session. |
 | Always-on hosting | your call: Oracle Cloud Always Free, or ~$7/mo. |
@@ -240,8 +241,21 @@ day's snapshot, and neither is built.
       pipeline, not a global feed. Add BusinessLine, Moneycontrol and Business
       Standard to the existing RSS parser. This prepares the call; it does not rank
       the pipeline.
-- [ ] **Add ACER as the 8th agency** so we stop pitching our own clients.
-      **Blocked: ACER must provide the rating book. No public source has it.**
+- [x] **ACER as the 8th agency** - `backend/pipeline/acer_book.py` +
+      `backend/data/acer_book.json`. ACER's book today is **2 issuers, 3 actions**:
+      Finstars Capital (ACER BBB- Stable, assigned 17-Jun-2026) and Viviana Power
+      Tech (ACER BBB Stable, reaffirmed 24-Aug-2026).
+      Two jobs, and the first is the point: our own clients are now **excluded
+      from the ranked queue**, so nobody can cold-call a company we already rate.
+      Second, `GET /api/renewals` surfaces annual surveillance coming due -
+      Finstars 17-Jun-2027, Viviana 24-Aug-2027. Only the latest action per
+      issuer dates the review, or Viviana's March assignment would raise the
+      alarm five months early.
+      **Hand-maintained on purpose:** acerratings.com returns 403 to plain HTTP
+      (its WAF blocks non-browser clients), so our own site is the one CRA site we
+      cannot read programmatically. `staleness()` reports how old the file is, so
+      a forgotten list is visible rather than silently wrong. Update
+      `backend/data/acer_book.json` whenever ACER publishes.
 - [ ] ~~Weekly digest email~~ - **PARKED, not cancelled.** Everything it needs (the
       ranked queue, per-user identity, the send list) falls out of the dashboard
       work above, so building the dashboard first costs the email nothing.
