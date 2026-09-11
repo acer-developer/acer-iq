@@ -34,7 +34,7 @@ from __future__ import annotations
 import asyncio
 import logging
 
-from backend.pipeline import cra_press, winnability
+from backend.pipeline import action_history, cra_press, winnability
 
 log = logging.getLogger(__name__)
 
@@ -148,7 +148,14 @@ async def build_queue(days: int = 30, enrich: int = 15) -> dict:
     # regrouping ~120 rows costs microseconds. A second layer would only add a
     # staleness window with no saving.
     data = await cra_press.fetch_recent_actions(days=days)
-    rows = build_rows(data["actions"])
+
+    # Fold today's fetch into the archive, then build from live + archived. The
+    # feeds are latest-page snapshots, so without this the `days` window was
+    # decoration: days=365 returned the same rows as days=60. History now
+    # accumulates from ordinary use, with no scheduled job to forget to run.
+    new_rows = action_history.record(data["actions"])
+    actions = action_history.merge(data["actions"], action_history.since(days))
+    rows = build_rows(actions)
     enriched = await _enrich_coverage(rows, enrich)
     # Enrichment can change scores and block states, so the order is only valid
     # after it has run.
@@ -173,12 +180,15 @@ async def build_queue(days: int = 30, enrich: int = 15) -> dict:
             "agencies_total": len(sources),
             "data_status": data["data_status"],
             "enriched": enriched,
+            "history": action_history.stats() | {"new_this_build": new_rows},
             # Said in words so the UI cannot quietly drop it.
             "note": ("Built from "
                      + (", ".join(readable) if readable else "no agency")
                      + f" of {len(sources)} CRAs; top {enriched} checked against "
-                       "CARE for full coverage. First-time issuers cannot appear "
-                       "here by construction; agencies that could not be read are "
+                       "CARE for full coverage. The window is served from the "
+                       "local archive, which only goes back as far as this tool "
+                       "has been running. First-time issuers cannot appear here "
+                       "by construction; agencies that could not be read are "
                        "listed as blocked."),
         },
     }

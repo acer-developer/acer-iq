@@ -7,6 +7,7 @@ import CompanyResearchPage from "./components/company/CompanyResearchPage.jsx";
 import MarketNewsPage from "./components/MarketNewsPage.jsx";
 import SignalRadarPage from "./components/SignalRadarPage.jsx";
 import QueuePage from "./components/QueuePage.jsx";
+import PipelinePage from "./components/PipelinePage.jsx";
 import ComingSoon from "./components/ComingSoon.jsx";
 import SourceHealth from "./components/SourceHealth.jsx";
 import { apiUrl } from "./lib/api.js";
@@ -392,18 +393,9 @@ export default function App() {
         </>
       )}
 
-      {/* My Pipeline (coming soon) */}
+      {/* My Pipeline (live) */}
       {activeTab === "pipeline" && (
-        <ComingSoon
-          title="My Pipeline"
-          description="Track leads from discovery to conversion. Move companies through stages: identified, contacted, meeting done, proposal sent, mandated, or lost. Connects to signals and news so no lead gets forgotten."
-          icon={
-            <svg className="h-8 w-8 text-blue-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-              <path strokeLinecap="round" strokeLinejoin="round"
-                d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
-            </svg>
-          }
-        />
+        <PipelinePage />
       )}
 
     </div>

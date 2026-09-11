@@ -507,6 +507,84 @@ def test_lead_routes_are_registered_and_events_is_not_a_company_name():
     assert paths.index("/api/leads/events") < paths.index("/api/leads/{company_name}")
 
 
+# -- Search persistence falls back to SQLite (no Supabase project) ------------
+
+def test_search_store_works_without_supabase():
+    """The whole point: a restart must not start 404-ing CSV exports. Supabase
+    was never set up, so SQLite has to carry this."""
+    from backend import database
+    assert database.supabase_configured() is False
+    assert database.backend_name() == "sqlite"
+
+
+def test_health_names_the_search_store_in_use():
+    """Nobody should have to guess whether their searches are being persisted."""
+    h = asyncio.run(main.health())
+    assert any(s["name"].startswith("Search store") for s in h["sources"]), h["sources"]
+
+
+# -- Action history makes the `days` window real ------------------------------
+
+def test_history_dedupes_a_refetched_page():
+    """The feeds are refetched every 15 minutes. Without dedup on the natural
+    key, one company's action multiplies into dozens of rows."""
+    import tempfile
+    from pathlib import Path
+    from backend.pipeline import action_history as ah
+    real = ah.DB_PATH
+    tmp = tempfile.mkdtemp()
+    ah.DB_PATH = Path(tmp) / "t.sqlite"
+    try:
+        batch = [{"agency": "ACUITE", "company_name": "Acme Ltd", "rating": "A",
+                  "action": "Reaffirmed", "date": "01-09-2026"}]
+        assert ah.record(batch) == 1
+        assert ah.record(batch) == 0
+    finally:
+        ah.DB_PATH = real
+
+
+def test_history_merge_prefers_the_live_row():
+    """A correction in a re-fetch must not be shadowed by the stored copy."""
+    from backend.pipeline import action_history as ah
+    key = {"agency": "ACUITE", "company_name": "Acme Ltd", "rating": "A",
+           "action": "Reaffirmed", "date": "01-09-2026"}
+    live = [dict(key, source_url="fresh")]
+    archived = [dict(key, source_url="stale")]
+    merged = ah.merge(live, archived)
+    assert len(merged) == 1 and merged[0]["source_url"] == "fresh"
+
+
+# -- Refinance window --------------------------------------------------------
+
+def test_refinance_never_reports_a_precise_date_it_does_not_have():
+    """BSE's scrip-id convention yields only a maturity YEAR for nearly every
+    live row. Showing that as '2026-01-01' reads as a precise deadline, and one
+    already in the past - a phantom deadline that sends BD chasing nothing."""
+    from backend.pipeline.refinance import maturing_within
+    from datetime import date
+    year_only = [{"issuer_name": "Navi Finserv Limited", "maturity_date": "2026"}]
+    rows = maturing_within(year_only, months_ahead=36, min_months=0)
+    assert rows, "a year-only maturity should still be a candidate"
+    r = rows[0]
+    assert r["maturity_precision"] == "year", r
+    assert r["maturity_label"] == "during 2026", r
+    assert r["maturity_latest"] == date(2026, 12, 31).isoformat(), r
+
+
+def test_refinance_excludes_a_row_with_no_maturity_at_all():
+    """Never defaulted. A guessed maturity is a fabricated deadline."""
+    from backend.pipeline.refinance import maturing_within
+    assert maturing_within([{"issuer_name": "X Ltd", "maturity_date": ""}],
+                           months_ahead=36, min_months=0) == []
+
+
+def test_refinance_endpoint_exists_and_bounds_its_window():
+    import inspect
+    paths = {getattr(r, "path", "") for r in main.app.routes}
+    assert "/api/refinance" in paths
+    assert "months must be between 1 and 36" in inspect.getsource(main.get_refinance)
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("test_"):

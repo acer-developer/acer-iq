@@ -1,32 +1,44 @@
 # ACER-IQ - TODO
 
-Live status as of **2026-09-10**, ordered to match [ROADMAP_V3.md](ROADMAP_V3.md).
+Live status as of **2026-09-11**, ordered to match [ROADMAP_V3.md](ROADMAP_V3.md).
 The rationale for the ordering - and the reframe from "find leads" to "rank on
 winnability" - is in that document. The three roadmap framings side by side are
 in `roadmap-evolution.html`.
 
-Legend: **FREE** = no new spend · **PAID** = costs money · **DECISION** = needs your call.
+Legend: **FREE** = no new spend - **PAID** = costs money - **DECISION** = needs your call.
 
 ## Where this actually stands
 
 **Working end to end:** CRA sites -> scored, ranked, credit-screened queue on
-screen. 4 of 7 agencies readable. 36 tests, four module self-checks, all offline.
+screen; saved leads and a pipeline with stages and outcome history; a
+forward-looking refinance window. 4 of 7 agencies readable. 48 tests, seven
+module self-checks, all offline.
+
+**The live numbers, so nothing is oversold:**
+
+| Surface | Today |
+|---|---|
+| Ranked queue | 54 leads, 0 workable, 24 blocked |
+| Refinance window (9 months) | **282 candidates**, real NBFCs |
+| Archive depth | 82 actions, collecting since 2026-09-11 |
+
+The queue reads 0 workable today and that is not a regression: yesterday's one
+winnable lead rolled off Ind-Ra's ten-item feed before the archive existed to
+catch it. The archive only goes back as far as this tool has been running, so
+this number gets strictly better with use. Meanwhile the refinance window is
+already the stronger surface - 282 issuers with debt maturing, and investment
+grade names rather than the sub-investment-grade MSME paper the CRA feeds carry.
 
 **Not done, and honest about why:**
 
 | Gap | Blocked on |
 |---|---|
-| Logins (per-user lists) | a Supabase project. **There isn't one** - every `.env` in the tree still has the README's `your_url_here` placeholders. Saved leads now run on SQLite instead, as one shared team list. |
-| Search persistence (`/api/export/{id}`) | same. `_search_cache` is still in-process. |
+| Logins (per-user lists) | a Supabase project. **There isn't one** - every `.env` still has the README's `your_url_here`. Saved leads run on SQLite as one shared team list. |
 | Renewal calendar (surveillance dates) | rationale-PDF parsing per agency. Multi-session. |
 | MCA first-timer join | bulk registry ingest + geocoding. Multi-session. |
+| Fundamentals for sizing | a free Twelve Data or Alpha Vantage API key. Both require a signup. |
 | Always-on hosting | your call: Oracle Cloud Always Free, or ~$7/mo. |
-| Outcome-driven scoring weights | six months of outcome data that does not exist yet. |
-
-**The live number, so it is not oversold:** 54 leads, 1 workable, 26 blocked.
-That is the credit screen working, not a bug - Acuite and Brickwork's published
-book is mostly sub-investment-grade MSME paper. Volume has to come from the
-renewal calendar and the MCA join, both still ahead.
+| Outcome-driven scoring weights | months of outcome data. The logging now exists to collect it. |
 
 ---
 
@@ -48,10 +60,13 @@ worth more than the whole build. They also change what the tool should rank.
 
 Everything downstream sits on this. Nothing here is glamorous.
 
-- [ ] **Persist every search to Supabase** - **FREE** - `_search_cache` is still
-      in-process, so a restart loses it and `/api/export/{id}` 404s. The code path
-      exists and logs loudly; it needs `SUPABASE_URL` / `SUPABASE_KEY` set and the
-      `searches` table created.
+- [x] **Persist every search** - `backend/database.py` now has two backends and
+      picks by what is configured: Supabase when credentials exist, **SQLite
+      otherwise**, which is the actual default since no Supabase project exists.
+      A restart no longer makes `/api/export/{id}` 404 at whoever was about to
+      download it. Supabase failures fall through to SQLite rather than losing
+      the search. Old rows are pruned on write (keep 500), so the file stays
+      bounded without a scheduled job. `/api/health` names which store is live.
 - [x] **Outcome logging schema** - built in `backend/pipeline/pipeline_store.py`
       on stdlib sqlite3, same pattern as `backend/registry/store.py`. Every save
       and every stage change appends to `lead_events` carrying the flags that
@@ -131,8 +146,20 @@ All **FREE**, but real scraping work. Full signal spec:
       `credit_screen()` blocks speculative-grade issuers and anything whose
       sources came back `unverified`. `blocked` and `suppressed` are separate
       states so the UI cannot conflate "must not call yet" with "not worth a call".
-- [ ] **Maturing-NCD refinance window** detector from the BSE scrip master we
-      already cache.
+- [x] **Maturing-NCD refinance window** - `backend/pipeline/refinance.py`,
+      `GET /api/refinance?months=9`. **282 live candidates**, and they are real
+      NBFCs (Navi Finserv, Muthoot Fincorp, Kotak Mahindra Prime, Satin
+      Creditcare) rather than the sub-investment-grade MSME paper the CRA
+      feeds surface. This is the only genuinely FORWARD-looking signal in the
+      tool: the feeds say what already happened, a maturing bond says what
+      must happen next.
+      **Precision caveat, and it matters:** BSE's scrip-id convention yields a
+      maturity *year*, not a date, for nearly every live row. Each row
+      therefore carries `maturity_precision` and a `maturity_label` ('during
+      2026'). It must never render as '2026-01-01' - that reads as a precise
+      deadline already in the past, which is exactly the phantom deadline that
+      sends BD chasing nothing. BSE also carries no issue amount at all, so
+      `total_amount_crores` is None on every live row.
 - [ ] **Merge the signal layer with the `unaccepted-ratings` repo** - both projects
       are solving the same problem twice today.
 - [ ] **Entity resolution** - joining MCA / NSE / BSE / CRA names is genuinely hard.
@@ -162,10 +189,18 @@ feeds are latest-page snapshots, so `days=365` returns the same rows as
 Real historical depth would need either per-company crawling or storing each
 day's snapshot, and neither is built.
 
-- [ ] **Persist a daily snapshot of the feeds** - **FREE** - the cheapest route to
-      real history: append each day's actions to Supabase and the queue stops
-      being limited to whatever is on page 1 today. Also the prerequisite for
-      anything trend-shaped ("three withdrawals this quarter").
+- [x] **Accumulate the feeds** - `backend/pipeline/action_history.py`. Every
+      queue build folds what it just fetched into SQLite, deduped on the
+      natural key (agency, company, rating, action, date) because these feeds
+      carry no stable id and are refetched every 15 minutes. Nothing is
+      scheduled and nothing needs backfilling: ordinary use builds the archive.
+      **The `days` window is now real** - it used to be decoration, with
+      days=365 returning exactly the same rows as days=60.
+      **But it only goes back as far as this tool has been running** (see
+      `coverage.history.collecting_since`), so today it holds one day. That is
+      also why the queue shows 0 workable right now: yesterday's one winnable
+      lead, Berar Finance, rolled off Ind-Ra's latest-10 feed before archiving
+      existed to catch it. This gets strictly better with every day of use.
 
 ## Phase 3 - Dashboard, logins, saved lists
 
@@ -194,11 +229,12 @@ day's snapshot, and neither is built.
       idempotent server-side, so clicking Add on a company already at Proposal
       will not reset it. `GET/POST /api/leads`, `POST /api/leads/{name}/stage`,
       `DELETE /api/leads/{name}`.
-- [~] **Pipeline tab** - the *backend* is done: stages Identified, Contacted,
-      Meeting, Proposal, Mandated, Lost, plus notes, funnel counts and full event
-      history, all served from `/api/leads`. Unknown stages are refused rather
-      than written. **Still to build: the UI for it.** Today a lead can be saved
-      from the queue, but only moved along the pipeline via the API.
+- [x] **Pipeline tab** - `frontend/src/components/PipelinePage.jsx`, registered in
+      `App.jsx`. Leads grouped by stage (order read from the API, not hardcoded),
+      funnel counts, move-with-note, remove-with-confirm, and per-lead event
+      history on expand. Every mutation surfaces failure inline: a stage move that
+      failed but looked like it worked would have someone believing a company was
+      contacted when it was not.
 - [ ] **De-duplicate leads across searches**, keyed on CIN.
 - [ ] **Briefing surface** - **FREE** - news attached to names already in the
       pipeline, not a global feed. Add BusinessLine, Moneycontrol and Business

@@ -30,6 +30,7 @@ from backend.pipeline.fit_analyzer import analyze_fit
 from backend.pipeline import winnability as winnability_scorer
 from backend.pipeline.lead_queue import build_queue
 from backend.pipeline import pipeline_store
+from backend.pipeline.refinance import find_refinance_candidates
 from backend.pipeline.market_news import fetch_market_news
 from backend.pipeline.rss_news import fetch_rss_news
 from backend.pipeline.sector_indices import fetch_sector_indices
@@ -135,6 +136,9 @@ def _source_status(total: int) -> list[dict]:
     status: dict[str, str] = {
         "RBI/NSE registry": "" if registry_store.available()
                             else "registry.sqlite missing - run the ingest CLI",
+        # Which store is actually holding searches. Worth surfacing: the whole
+        # point is that a restart must not start 404-ing CSV exports.
+        f"Search store ({database.backend_name()})": "",
         "BSE": "circuit breaker open - BSE unreachable or blocking" if _bse_tripped() else "",
         "AI scoring": "" if _llm_configured()
                       else "no LLM key configured - rule-based scores only",
@@ -329,6 +333,27 @@ async def get_queue(days: int = 30, enrich: int = 15):
                           "data_status": "unverified",
                           "note": "Queue could not be built - no CRA source answered."}}
     data = await _safe(build_queue(days=days, enrich=enrich), empty, "cra_press")
+    return {**data, "sources": _source_status(1)}
+
+
+# ── Refinance window: bonds maturing soon ────────────────────────────────────
+
+@app.get("/api/refinance")
+async def get_refinance(months: int = 9):
+    """Issuers with debt maturing inside the window, from the BSE scrip master
+    we already cache.
+
+    The one genuinely FORWARD-looking signal in the tool: the CRA feeds only ever
+    say what already happened, whereas a bond maturing has to be refinanced and
+    refinancing needs a rating. Note `maturity_precision` on each row - BSE's
+    scrip-id convention usually yields only a year, so most rows are
+    year-accurate, not day-accurate."""
+    if months < 1 or months > 36:
+        raise HTTPException(status_code=400, detail="months must be between 1 and 36")
+
+    _failures.set(Counter())
+    empty = {"candidates": [], "window_months": months, "data_status": "unverified"}
+    data = await _safe(find_refinance_candidates(months_ahead=months), empty, "bse_instruments")
     return {**data, "sources": _source_status(1)}
 
 
