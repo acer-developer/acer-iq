@@ -278,7 +278,7 @@ export default function App() {
             <div className="shrink-0 border-b border-red-200 bg-red-50 px-5 py-2 text-sm text-red-700">
               <span className="font-semibold">Error:</span> {error}
               <span className="ml-2 text-xs text-red-500">
-                (Make sure the backend is running: <code className="font-mono">uvicorn backend.main:app --reload --port 8000</code>)
+                The server may be waking up; try again in a minute.
               </span>
             </div>
           )}

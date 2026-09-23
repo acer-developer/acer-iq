@@ -11,7 +11,7 @@ from pathlib import Path
 import httpx
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import RedirectResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -30,6 +30,8 @@ from backend.pipeline.fit_analyzer import analyze_fit
 from backend.pipeline import winnability as winnability_scorer
 from backend.pipeline.lead_queue import build_queue
 from backend.pipeline import pipeline_store
+from backend.pipeline.briefing import build_briefing
+from backend.pipeline import brief as pitch_brief
 from backend.pipeline.refinance import find_refinance_candidates
 from backend.pipeline.fundamentals import fetch_for_symbol as fetch_fundamentals
 from backend.pipeline import acer_book
@@ -398,6 +400,9 @@ async def get_refinance(months: int = 9):
 
 class SaveLeadRequest(BaseModel):
     company_name: str
+    # Identity, when the finding source had one. The CRA feeds do not, so the
+    # store falls back to the folded name - see pipeline_store.norm_name.
+    cin: str | None = None
     winnability: int | None = None
     flags: dict | None = None
     agencies_seen: list[str] | None = None
@@ -448,6 +453,66 @@ async def delete_saved_lead(company_name: str):
     if not pipeline_store.remove_lead(company_name):
         raise HTTPException(status_code=404, detail=f"{company_name} is not saved")
     return {"removed": company_name}
+
+
+# ── Briefing: news for names already in the pipeline ─────────────────────────
+
+
+@app.get("/api/briefing")
+async def get_briefing(limit_per_lead: int = 8):
+    """What the papers said about the companies we are about to call.
+
+    Not a market feed: it only speaks about saved leads. An unreachable set of
+    publishers must read as unreachable, never as "no news", so `status` and
+    `sources_fail` ride along and the UI has to render them."""
+    leads = pipeline_store.list_leads()
+    if not leads:
+        return {"briefs": [], "with_news": 0, "scanned": 0, "status": "empty",
+                "sources_ok": [], "sources_fail": [],
+                "note": "No saved leads, so there is nothing to brief."}
+    empty = {"briefs": [], "with_news": 0, "scanned": 0, "status": "blocked",
+             "sources_ok": [], "sources_fail": ["news feeds unreachable"]}
+    return await _safe(build_briefing(leads, max(1, min(limit_per_lead, 25))),
+                       empty, "rss_news")
+
+
+# ── Pitch brief: one printable page per company ──────────────────────────────
+
+
+async def _briefs_for(leads: list[dict]) -> list[dict]:
+    """Assemble what each sheet prints: the stored lead, its history, its news.
+
+    News is best-effort on purpose - a dead RSS feed must not cost someone the
+    brief they are printing on the way to a meeting."""
+    news_by_company: dict[str, list[dict]] = {}
+    data = await _safe(build_briefing(leads), {"briefs": []}, "rss_news")
+    for b in data.get("briefs", []):
+        news_by_company[b["company_name"]] = b.get("items", [])
+    return [{"lead": lead,
+             "events": pipeline_store.events(lead["company_name"], limit=12),
+             "news": news_by_company.get(lead["company_name"], [])}
+            for lead in leads]
+
+
+@app.get("/api/brief", response_class=HTMLResponse)
+async def brief_pack(stage: str | None = None):
+    """The whole pipeline as a print-ready pack, one A4 sheet per company.
+
+    HTML, not a PDF binary: the browser's print-to-PDF makes the file, which
+    keeps a PDF engine out of the dependency list entirely."""
+    leads = pipeline_store.list_leads(stage)
+    return pitch_brief.render(await _briefs_for(leads),
+                              title=f"ACER-IQ pitch briefs{f' - {stage}' if stage else ''}")
+
+
+@app.get("/api/brief/{company_name}", response_class=HTMLResponse)
+async def brief_one(company_name: str):
+    leads = [l for l in pipeline_store.list_leads()
+             if pipeline_store.norm_name(l["company_name"]) == pipeline_store.norm_name(company_name)]
+    if not leads:
+        raise HTTPException(status_code=404, detail=f"{company_name} is not saved")
+    return pitch_brief.render(await _briefs_for(leads),
+                              title=f"ACER-IQ pitch brief - {leads[0]['company_name']}")
 
 
 # ── Sector Indices (Signal Radar) ────────────────────────────────────────────

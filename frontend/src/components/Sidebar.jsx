@@ -1,5 +1,6 @@
 import React from "react";
 import LeadScore from "./LeadScore.jsx";
+import { apiUrl } from "../lib/api.js";
 
 const ENTITY_BADGE = {
   "Bank":             "text-blue-700 bg-blue-50 border border-blue-200",
@@ -21,7 +22,7 @@ function SkeletonCard() {
 export default function Sidebar({ companies, loading, selectedId, onSelectCompany, searchId, city, industry }) {
   const handleExport = () => {
     if (!searchId) return;
-    window.open(`/api/export/${searchId}`, "_blank");
+    window.open(apiUrl(`/api/export/${searchId}`), "_blank");
   };
 
   return (

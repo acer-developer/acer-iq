@@ -65,6 +65,19 @@ _REASONS = {
 SUPPRESS_BELOW = 40
 
 
+def reasons_for(flags: dict, rated_by: int = 0) -> list[str]:
+    """Plain-English reasons behind a set of flags.
+
+    Split out of `score` so the pitch brief can explain a lead from the flags
+    stored against it months ago, without re-scoring it against today's data -
+    and so the wording is the same in both places."""
+    reasons = [_REASONS[k].format(n=rated_by) for k in _WEIGHTS if flags.get(k)]
+    return reasons or [
+        "Comfortably rated elsewhere with no trigger - low priority"
+        if rated_by else
+        "No signal either way - rating coverage could not be established"]
+
+
 def _action_text(credit_data: dict) -> str:
     """Every scrap of rating-action wording, lowercased into one haystack."""
     parts: list[str] = []
@@ -134,15 +147,7 @@ def score(company: dict, credit_data: dict) -> dict:
     raw = sum(w for k, w in _WEIGHTS.items() if f[k])
     value = min(raw, 100)
 
-    reasons = []
-    for k in _WEIGHTS:
-        if f[k]:
-            reasons.append(_REASONS[k].format(n=rated_by))
-    if not reasons:
-        reasons.append(
-            "Comfortably rated elsewhere with no trigger - low priority"
-            if rated_by else
-            "No signal either way - rating coverage could not be established")
+    reasons = reasons_for(f, rated_by)
 
     screen = credit_screen(credit_data)
     return {

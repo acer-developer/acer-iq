@@ -125,6 +125,14 @@ function LeadCard({ lead, stages, onMove, onRemove, moveError, removeError, busy
         </div>
 
         <div className="flex shrink-0 flex-col items-end gap-1.5">
+          <a
+            href={apiUrl(`/api/brief/${encodeURIComponent(lead.company_name)}`)}
+            target="_blank"
+            rel="noreferrer"
+            className="rounded-lg border border-gray-200 bg-white px-2.5 py-1 text-xs font-medium text-gray-600 transition hover:bg-gray-50"
+          >
+            Brief
+          </a>
           <button
             onClick={() => setShowMove((v) => !v)}
             disabled={busy}
@@ -305,6 +313,17 @@ export default function PipelinePage() {
       <div className="shrink-0 border-b border-gray-200 bg-white px-6 py-3">
         <div className="flex items-center justify-between">
           <h2 className="text-sm font-bold text-gray-900">My Pipeline</h2>
+          <div className="flex items-center gap-2">
+          {leads.length > 0 && (
+            <a
+              href={apiUrl("/api/brief")}
+              target="_blank"
+              rel="noreferrer"
+              className="rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-medium text-gray-600 transition hover:bg-gray-50"
+            >
+              Print briefs
+            </a>
+          )}
           <button
             onClick={fetchLeads}
             disabled={loading}
@@ -315,6 +334,7 @@ export default function PipelinePage() {
             </svg>
             Refresh
           </button>
+          </div>
         </div>
 
         {/* Funnel: every stage shown, even at zero */}

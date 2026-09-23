@@ -35,19 +35,13 @@ import asyncio
 import logging
 
 from backend.pipeline import acer_book, action_history, cra_press, winnability
+from backend.pipeline.pipeline_store import norm_name as _norm
 
 log = logging.getLogger(__name__)
 
-def _norm(name: str) -> str:
-    """Fold an issuer name for grouping. Deliberately conservative: we would
-    rather split one company into two rows than merge two companies into one and
-    put the wrong rating against a name a salesperson is about to call."""
-    out = " ".join((name or "").upper().split())
-    for suffix in (" PRIVATE LIMITED", " PVT LTD", " PVT. LTD.", " LIMITED", " LTD.", " LTD"):
-        if out.endswith(suffix):
-            out = out[: -len(suffix)]
-            break
-    return out.strip(" .,-")
+# `_norm` folds an issuer name for grouping and lives in pipeline_store, which
+# de-duplicates saved leads with the same function. Two different foldings would
+# mean the queue merging two rows the pipeline then splits back apart.
 
 
 def _credit_data_for(actions: list[dict]) -> dict:

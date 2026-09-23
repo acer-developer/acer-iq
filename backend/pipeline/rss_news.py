@@ -20,6 +20,22 @@ _FEEDS = {
         "url": "https://www.livemint.com/rss/markets",
         "site": "https://www.livemint.com/market",
     },
+    # Added for the briefing surface: company news for names already in the
+    # pipeline. Three more publishers is three more chances that a company we
+    # are about to call appears at all - one feed's markets page is mostly
+    # index commentary, and a mid-cap issuer shows up in none of it.
+    "BusinessLine": {
+        "url": "https://www.thehindubusinessline.com/companies/feeder/default.rss",
+        "site": "https://www.thehindubusinessline.com/companies/",
+    },
+    "Moneycontrol": {
+        "url": "https://www.moneycontrol.com/rss/business.xml",
+        "site": "https://www.moneycontrol.com/news/business/",
+    },
+    "Business Standard": {
+        "url": "https://www.business-standard.com/rss/companies-101.rss",
+        "site": "https://www.business-standard.com/companies",
+    },
 }
 
 _HEADERS = {
