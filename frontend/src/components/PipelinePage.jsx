@@ -19,7 +19,9 @@ const FLAG_META = {
 };
 
 const LABEL = (f) => f.replace(/_rs$/, " (Rs)").replace(/_cr$/, " (Rs cr)").replace(/_/g, " ");
-const today = () => new Date().toISOString().slice(0, 10);
+// The BD's own calendar day (toISOString is UTC - a day behind in India
+// until 05:30, which would mark tomorrow's follow-ups overdue).
+const today = () => new Date().toLocaleDateString("en-CA");
 
 async function jsonOrThrow(res) {
   const body = await res.json().catch(() => ({}));

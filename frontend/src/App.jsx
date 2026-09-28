@@ -12,7 +12,7 @@ import ComingSoon from "./components/ComingSoon.jsx";
 import SourceHealth from "./components/SourceHealth.jsx";
 import LoginPage from "./components/LoginPage.jsx";
 import { apiUrl } from "./lib/api.js";
-import { authConfigured, supabase } from "./lib/auth.js";
+import { apiFetch, authConfigured, supabase } from "./lib/auth.js";
 import { ADMIN, DEFAULT_BDS, ProfileContext, loadProfileId, saveProfileId } from "./lib/profile.js";
 import BDListPage from "./components/BDListPage.jsx";
 
@@ -163,7 +163,13 @@ export default function App() {
   return <Workspace session={session} />;
 }
 
-function ProfileSwitcher({ profileId, setProfileId, bds }) {
+function ProfileSwitcher({ profileId, setProfileId, bds, me }) {
+  // A signed-in BD who is not Admin sees only their own view (the server
+  // refuses the rest anyway - this just does not offer it).
+  if (me && !me.admin) {
+    const own = bds.find((b) => b.id === me.profile);
+    return <span className="text-xs font-semibold text-gray-700">{own ? own.name : me.email}</span>;
+  }
   return (
     <label className="flex items-center gap-1.5 text-xs text-gray-500">
       View as
@@ -187,6 +193,20 @@ function Workspace({ session }) {
     fetch(apiUrl("/api/roster")).then((r) => (r.ok ? r.json() : null))
       .then((d) => { if (d?.bds?.length) setBds(d.bds); }).catch(() => {});
   }, []);
+  const [me, setMe] = useState(null);
+  React.useEffect(() => {
+    if (!authConfigured) return;
+    apiFetch("/api/me").then((r) => (r.ok ? r.json() : null)).then((d) => {
+      if (!d) return;
+      setMe(d);
+      // Open on the BD's own profile the first time, or always if not Admin.
+      let chosen = "set";
+      try { chosen = localStorage.getItem("acer-iq.profile"); } catch { /* private mode */ }
+      if (d.profile && (!d.admin || chosen === null)) {
+        setProfileId(d.profile);
+      }
+    }).catch(() => {});
+  }, [session?.user?.id]);
   const bd = bds.find((b) => b.id === profileId);
   const profile = bd ?? ADMIN;
   const profileValue = { profile, bds, isAdmin: !bd };
@@ -301,7 +321,7 @@ function Workspace({ session }) {
             <span className="text-sm font-bold text-gray-900">ACER-IQ</span>
           </div>
           <div className="ml-auto flex items-center gap-3">
-            <ProfileSwitcher profileId={profile.id} setProfileId={setProfileId} bds={bds} />
+            <ProfileSwitcher profileId={profile.id} setProfileId={setProfileId} bds={bds} me={me} />
             {authConfigured ? (
               <>
                 <span className="text-xs text-gray-500">{session?.user?.email}</span>

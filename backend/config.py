@@ -19,6 +19,11 @@ class Settings(BaseSettings):
     # ships in every browser bundle can read them but never write to them.
     # Without it the archives fall back to SQLite and /api/health says so.
     supabase_service_key: str = ""
+    # Comma-separated emails allowed the Admin actions (regenerate the month's
+    # list, reassign leads, see every BD's pipeline). Empty = every signed-in
+    # user - acceptable only while Supabase sign-ups are closed; /api/health
+    # says which mode is on.
+    admin_emails: str = ""
     # Comma-separated exact origins. Empty = fall back to the regex below
     # (any *.vercel.app deploy + localhost dev), which is what prod uses.
     allowed_origins: str = ""

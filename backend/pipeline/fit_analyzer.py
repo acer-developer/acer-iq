@@ -1,5 +1,5 @@
 from backend.pipeline import llm
-from backend.pipeline.llm import chat, parse_json
+from backend.pipeline.llm import chat_with_model, parse_json
 
 FIT_PROMPT = """\
 You are a strategic business analyst at ACER (Infomerics Valuation and Rating Pvt. Ltd.), \
@@ -201,6 +201,11 @@ def _data_driven_analysis(company: dict, credit_data: dict) -> dict:
     }
 
 
+async def chat(prompt: str, max_tokens: int = 600):
+    """Indirection so tests can stub the model call."""
+    return await chat_with_model(prompt, max_tokens)
+
+
 async def analyze_fit(company: dict, credit_data: dict) -> dict:
     """
     Produce ACER fit analysis. Always generates a real data-driven result
@@ -240,23 +245,28 @@ async def analyze_fit(company: dict, credit_data: dict) -> dict:
         rated_by_count=rated_by_count,
     )
 
-    raw    = await chat(prompt, max_tokens=600)
+    raw, model = await chat(prompt, max_tokens=600)
     parsed = parse_json(raw) if raw else None
 
-    if parsed and isinstance(parsed.get("fit_score"), (int, float)):
-        parsed["fit_label"] = _label(int(parsed["fit_score"]))
+    score = parsed.get("fit_score") if parsed else None
+    if isinstance(score, (int, float)) and not isinstance(score, bool):
+        # Clamp: an LLM "150" or "-5" is not a score (LLM trust boundary).
+        parsed["fit_score"] = max(0, min(100, int(score)))
+        parsed["fit_label"] = _label(parsed["fit_score"])
         # LLM output trust boundary: keep only the fields the UI renders, typed,
         # and fall back field by field so nothing ever blanks (PREMORTEM 6).
         out = dict(result)
         for k in ("fit_score", "fit_label", "opportunity_type", "recommended_action",
-                  "best_instrument_pitch", "urgency"):
+                  "best_instrument_pitch"):
             if isinstance(parsed.get(k), (str, int, float)) and str(parsed[k]).strip():
-                out[k] = parsed[k]
+                out[k] = parsed[k] if not isinstance(parsed[k], str) else parsed[k][:300]
+        if parsed.get("urgency") in ("High", "Medium", "Low"):
+            out["urgency"] = parsed["urgency"]
         for k in ("key_insights", "watch_outs"):
             v = parsed.get(k)
             if isinstance(v, list) and v and all(isinstance(x, str) for x in v):
                 out[k] = [x[:300] for x in v[:6]]
-        out["analysis_source"] = f"AI - {llm.last_answer.get('model') or llm.last_answer.get('provider', 'LLM')}"
+        out["analysis_source"] = f"AI - {model or 'LLM'}"
         return out
 
     return result

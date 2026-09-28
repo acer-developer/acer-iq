@@ -451,6 +451,8 @@ async def _pipeline(fn):
         raise HTTPException(status_code=503, detail=str(e))
     except pipeline_store.Conflict as e:
         raise HTTPException(status_code=409, detail=str(e))
+    except pipeline_store.Forbidden as e:
+        raise HTTPException(status_code=403, detail=str(e))
 
 
 class SaveLeadRequest(BaseModel):
@@ -574,6 +576,7 @@ async def pipeline_team(authorization: str | None = Header(None)):
     overdue follow-ups, lost reasons, self-sourced count, and clashes."""
     from backend.pipeline import bd_list
     tok = _bearer(authorization)
+    await _pipeline(lambda: pipeline_store.require_admin(tok))
     leads = await _pipeline(lambda: pipeline_store.list_all_leads(tok))
     snap = await asyncio.to_thread(bd_list.load, bd_list.month_key())
     summary = pipeline_store.team_summary(leads, (snap or {}).get("rows", []), bd_list.roster())
@@ -766,17 +769,38 @@ async def get_bd_list(month: str = "", authorization: str | None = Header(None))
     if month and not _re.fullmatch(r"\d{4}-\d{2}", month):
         raise HTTPException(status_code=400, detail="month must be YYYY-MM")
     from backend.pipeline import bd_list
-    return await bd_list.get_or_generate(month or None)
+    # Rows carry ACER's history with each name (lost deals, fees) - signed-in only.
+    tok = _bearer(authorization)
+    await _pipeline(lambda: pipeline_store.caller(tok))
+    try:
+        return await bd_list.get_or_generate(month or None)
+    except pipeline_store.StoreUnavailable as e:
+        raise HTTPException(status_code=503, detail=str(e))
 
 
 @app.post("/api/bd-list/regenerate")
 async def regenerate_bd_list(authorization: str | None = Header(None)):
     """Build a new version of this month's list (the old one is kept). Needs a
     signed-in session when sign-in is on - the list is the team's month."""
-    if pipeline_store.per_user() and not _bearer(authorization):
-        raise HTTPException(status_code=401, detail="sign in to regenerate the list")
+    tok = _bearer(authorization)
+    await _pipeline(lambda: pipeline_store.require_admin(tok))
     from backend.pipeline import bd_list
-    return await bd_list.get_or_generate(force=True)
+    try:
+        return await bd_list.get_or_generate(force=True)
+    except pipeline_store.StoreUnavailable as e:
+        raise HTTPException(status_code=503, detail=str(e))
+
+
+@app.get("/api/me")
+async def whoami(authorization: str | None = Header(None)):
+    """Who the signed-in user is to ACER-IQ: Admin or not, and which BD
+    profile their email maps to - so the app opens on the right view."""
+    tok = _bearer(authorization)
+    if not pipeline_store.per_user():
+        return {"email": "", "admin": True, "profile": "", "mode": "local"}
+    c = await _pipeline(lambda: pipeline_store.caller(tok))
+    return {"email": c["email"], "admin": c["admin"], "profile": c["profile"],
+            "admin_restricted": bool(settings.admin_emails.strip())}
 
 
 # ── Macro (Tab 1): event -> sector -> named companies ────────────────────────
@@ -1068,7 +1092,10 @@ async def health():
         # Logged at WARNING so an always-on host's log alerting can fire on it
         # without anything having to poll this endpoint.
         log.warning("health: degraded sources %s", ", ".join(degraded))
+    access = ("ADMIN_EMAILS set - Admin restricted" if settings.admin_emails.strip()
+              else "ADMIN_EMAILS not set - every signed-in user has Admin; keep Supabase sign-ups closed")
     return {
+        "access": access,
         # "ok" still means the process is alive; "degraded" is the signal an
         # uptime check should page on, and it must not be buried in a sub-list.
         "status": "degraded" if degraded else "ok",

@@ -157,6 +157,63 @@ def safe_url(url: str) -> str:
     return u if u.lower().startswith(("https://", "http://")) else ""
 
 
+_users: dict[str, tuple[float, dict | None]] = {}
+
+
+def verify_user(token: str | None) -> dict | None:
+    """{id, email} for a valid Supabase session token, else None. Asks Supabase
+    Auth itself, so a forged or expired token is refused - never trust a
+    token's contents just because it decodes. Cached 5 minutes per token."""
+    import time
+    import httpx
+    if not supabase_configured() or not token:
+        return None
+    hit = _users.get(token)
+    if hit and time.time() - hit[0] < 300:
+        return hit[1]
+    try:
+        r = httpx.get(f"{settings.supabase_url.rstrip('/')}/auth/v1/user", timeout=10,
+                      headers={"apikey": settings.supabase_key,
+                               "Authorization": f"Bearer {token}"})
+        body = r.json() if r.status_code == 200 else None
+        user = ({"id": body["id"], "email": (body.get("email") or "").lower()}
+                if body and body.get("id") else None)
+    except Exception as e:
+        log.warning("Supabase auth check failed: %s: %s", type(e).__name__, e)
+        return None                    # not cached: a blip must not lock anyone out
+    if len(_users) > 500:
+        _users.clear()
+    _users[token] = (time.time(), user)
+    return user
+
+
+_ids: dict[str, tuple[float, dict]] = {}
+
+
+def user_ids_by_email() -> dict:
+    """email -> auth user id, via the Auth admin API (service key only).
+    Lets a lead be owned by the BD it is assigned to, not whoever clicked."""
+    import time
+    import httpx
+    if not (supabase_configured() and settings.supabase_service_key):
+        return {}
+    hit = _ids.get("all")
+    if hit and time.time() - hit[0] < 600:
+        return hit[1]
+    try:
+        r = httpx.get(f"{settings.supabase_url.rstrip('/')}/auth/v1/admin/users",
+                      params={"page": 1, "per_page": 200}, timeout=15,
+                      headers={"apikey": settings.supabase_service_key,
+                               "Authorization": f"Bearer {settings.supabase_service_key}"})
+        users = r.json().get("users", []) if r.status_code == 200 else []
+    except Exception as e:
+        log.warning("Supabase user list failed: %s: %s", type(e).__name__, e)
+        return {}
+    out = {(u.get("email") or "").lower(): u["id"] for u in users if u.get("id")}
+    _ids["all"] = (time.time(), out)
+    return out
+
+
 def user_client(token: str):
     """A PostgREST client acting as the signed-in user, so row level security
     applies (auth.uid() is theirs). None when Supabase is not configured.

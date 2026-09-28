@@ -96,7 +96,8 @@ def validate_stage(stage: str, details: dict | None) -> dict:
         elif kind == "number":
             try:
                 v = float(v)
-                if v <= 0:
+                # "nan"/"inf" parse as floats and cannot go into jsonb.
+                if not __import__("math").isfinite(v) or v <= 0:
                     raise ValueError
             except (TypeError, ValueError):
                 problems.append(f"{field} must be a positive number")
@@ -383,6 +384,37 @@ class Conflict(Exception):
     """The row changed between read and write (HTTP 409)."""
 
 
+class Forbidden(Exception):
+    """Signed in, but not allowed this action (HTTP 403)."""
+
+
+def caller(token: str | None) -> dict:
+    """Who is asking: {id, email, admin, profile}. Verified with Supabase Auth
+    (database.verify_user) - never read off the token. Without Supabase
+    (local dev) everyone is the single Admin.
+
+    admin: email in ADMIN_EMAILS; if that is unset, every signed-in user.
+    ponytail: the unset mode is only safe with Supabase sign-ups closed -
+    /api/health reports it. profile: the roster BD whose email this is."""
+    from backend.config import settings
+    from backend.pipeline import roster
+    if not per_user():
+        return {"id": "", "email": "", "admin": True, "profile": ""}
+    u = database.verify_user(token)
+    if not u:
+        raise AuthRequired("sign in to use the pipeline")
+    admins = {e.strip().lower() for e in settings.admin_emails.split(",") if e.strip()}
+    return u | {"admin": (u["email"] in admins) if admins else True,
+                "profile": roster.profile_for_email(u["email"])}
+
+
+def require_admin(token: str | None) -> dict:
+    c = caller(token)
+    if not c["admin"]:
+        raise Forbidden("Admin only")
+    return c
+
+
 def _client(token: str | None):
     if not token:
         raise AuthRequired("sign in to use the pipeline")
@@ -544,7 +576,43 @@ def _dispatch(label: str, token, remote_fn, local_fn):
         c.session.close()
 
 
+class _ServiceAs:
+    """The service client pinned to one user's rows, shaped like a user
+    client, so _remote_save can write a lead straight into the assigned BD's
+    pipeline when Admin adds it for them."""
+
+    def __init__(self, sc, uid: str):
+        self.sc, self.uid = sc, uid
+
+    def table(self, name):
+        t = self.sc.table(name)
+        uid = self.uid
+
+        class _T:
+            def select(self_, *a, **k):
+                return t.select(*a, **k).eq("user_id", uid)
+
+            def insert(self_, row):
+                return t.insert(row | {"user_id": uid})
+
+            def update(self_, patch):
+                return t.update(patch).eq("user_id", uid)
+        return _T()
+
+
 def save_lead(lead: dict, token: str | None = None) -> dict:
+    owner = (lead.get("owner") or "").strip()
+    if per_user() and owner:
+        from backend.pipeline import roster
+        who = caller(token)
+        if owner != who["profile"] and not who["admin"]:
+            raise Forbidden("only Admin can add a lead to another BD's pipeline")
+        uid = database.user_ids_by_email().get(roster.email_for_profile(owner), "")
+        if uid and uid != who["id"]:
+            ok, res = database.remote("save for BD", lambda sc: _remote_save(_ServiceAs(sc, uid), lead))
+            if not ok:
+                raise StoreUnavailable("saving into another BD's pipeline needs SUPABASE_SERVICE_KEY")
+            return res
     return _dispatch("save", token, lambda c: _remote_save(c, lead),
                      lambda: _local_save_lead(lead))
 
@@ -591,16 +659,15 @@ def list_all_leads(token: str | None = None, owner: str = "") -> list[dict]:
         return [r for r in rows if not owner or (r.get("owner") or "") == owner]
     if not per_user():
         return narrow(_local_list_leads())
-    c = _client(token)
-    try:
-        _call("auth check", lambda: c.table("saved_leads").select("company_name").limit(1).execute())
-    finally:
-        c.session.close()
+    who = caller(token)
+    # A BD may read their own profile's leads; everything else is Admin's.
+    if not who["admin"] and not (owner and owner == who["profile"]):
+        raise Forbidden("the team pipeline is Admin only")
     ok, rows = database.remote("pipeline all leads", lambda sc: database.select_all(
         sc, "saved_leads", "*", ("user_id", "company_name")))
     if not ok:
         raise StoreUnavailable("team pipeline needs SUPABASE_SERVICE_KEY on the server")
-    me = _jwt_sub(token or "")
+    me = who["id"]
     out = [_remote_decode(r, me) for r in rows or []]
     out.sort(key=lambda r: r.get("updated_at") or "", reverse=True)
     return narrow(out)
@@ -637,7 +704,8 @@ def reassign(company_name: str, new_owner: str, reason: str, token: str | None,
             _event(con, row["company_name"], "reassigned",
                    f"{row['owner'] or 'unassigned'} -> {new_owner}: {reason.strip()[:300]}")
         return {"company_name": row["company_name"], "owner": new_owner}
-    list_all_leads(token)                      # a valid session, or AuthRequired
+    require_admin(token)
+    from backend.pipeline import roster
     ok, rows = database.remote("pipeline reassign read", lambda sc: database.select_all(
         sc, "saved_leads", "company_name,user_id,owner", ("user_id", "company_name")))
     if not ok:
@@ -645,18 +713,31 @@ def reassign(company_name: str, new_owner: str, reason: str, token: str | None,
     row, _ = _match(rows or [], company_name)
     if row is None:
         raise KeyError(company_name)
+    # Control moves with the name: when the new BD has a mapped login, the row
+    # becomes theirs (RLS works on user_id, not on the owner label).
+    target_uid = database.user_ids_by_email().get(roster.email_for_profile(new_owner), "")
+    patch = {"owner": new_owner, "updated_at": _now()}
+    if target_uid and target_uid != row["user_id"]:
+        if any(r["user_id"] == target_uid and norm_name(r["company_name"]) == norm_name(row["company_name"])
+               for r in rows or []):
+            raise Conflict(f"{new_owner} already has {row['company_name']} in their pipeline")
+        patch["user_id"] = target_uid
 
     def write(sc):
-        sc.table("saved_leads").update({"owner": new_owner, "updated_at": _now()}).eq(
+        sc.table("saved_leads").update(patch).eq(
             "user_id", row["user_id"]).eq("company_name", row["company_name"]).execute()
         # The trigger logs the owner change; the reason is its own row.
         sc.table("lead_events").insert({
-            "company_name": row["company_name"], "user_id": row["user_id"],
+            "company_name": row["company_name"], "user_id": patch.get("user_id", row["user_id"]),
             "event": "note", "detail": f"reassigned to {new_owner}: {reason.strip()[:300]}"}).execute()
     ok, _ = database.remote("pipeline reassign", write)
     if not ok:
         raise StoreUnavailable("reassign failed")
-    return {"company_name": row["company_name"], "owner": new_owner}
+    return {"company_name": row["company_name"], "owner": new_owner,
+            "control_moved": "user_id" in patch,
+            "note": "" if "user_id" in patch else
+            f"{new_owner} has no mapped login yet - the lead is labelled theirs but stays "
+            "editable by its previous owner until their email is in bd_roster.json"}
 
 
 def team_summary(leads: list[dict], list_rows: list[dict], bds: list[dict],
@@ -664,8 +745,9 @@ def team_summary(leads: list[dict], list_rows: list[dict], bds: list[dict],
     """The Admin screen (spec 4), per BD. Pure: leads = every BD's saved rows
     (with owner, stage, stage_details, next_followup_date, origin); list_rows =
     this month's BD-list rows."""
-    from datetime import date as _date
-    today = today or _date.today().isoformat()
+    from datetime import date as _date, datetime as _dt
+    from zoneinfo import ZoneInfo
+    today = today or _dt.now(ZoneInfo("Asia/Kolkata")).date().isoformat()
     rank = {s: i for i, s in enumerate(STAGES)}
     out = {}
     for b in bds:
@@ -905,6 +987,12 @@ def _demo() -> None:
                 raise AssertionError("missing mandatory fields should be refused")
             except ValueError as e:
                 assert "designation is required" in str(e) and "next_followup_date" in str(e), e
+            try:
+                set_stage("Berar Finance Limited", "Proposal",
+                          details=EXAMPLE_DETAILS["Proposal"] | {"size_cr": "nan"})
+                raise AssertionError("nan size should be refused")
+            except ValueError:
+                pass
             try:
                 set_stage("Berar Finance Limited", "Lost",
                           details={"lost_reason": "Lost to another CRA", "note": "x"})

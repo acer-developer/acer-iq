@@ -655,10 +655,10 @@ def test_fit_analysis_says_whether_ai_answered():
     real_chat, real_prov = fit_analyzer.chat, llm._providers
 
     async def no_answer(prompt, max_tokens=600):
-        return None
+        return None, ""
     async def junk(prompt, max_tokens=600):
-        llm.last_answer.update(provider="OpenRouter", model="test/model:free")
-        return '{"fit_score": 77, "key_insights": "not a list", "recommended_action": ""}'
+        return ('{"fit_score": 177, "key_insights": "not a list", "recommended_action": ""}',
+                "test/model:free")
     llm._providers = lambda: [{"name": "OpenRouter"}]
     try:
         fit_analyzer.chat = no_answer
@@ -668,7 +668,7 @@ def test_fit_analysis_says_whether_ai_answered():
         fit_analyzer.chat = junk
         r = asyncio.run(fit_analyzer.analyze_fit(company, credit))
         assert r["analysis_source"] == "AI - test/model:free", r
-        assert r["fit_score"] == 77
+        assert r["fit_score"] == 100                         # clamped
         assert isinstance(r["key_insights"], list)          # junk ignored
         assert r["recommended_action"] == base_action        # blank ignored
     finally:
@@ -768,6 +768,40 @@ def test_self_sourced_lead_needs_cin_and_reason():
             pass
     ps.validate_self_sourced({"cin": "U65999MH2001PLC123456",
                               "reason": "Raising a Rs 300 cr NCD next quarter per their CFO"})
+
+
+def test_admin_actions_need_a_verified_admin():
+    """Review 2026-09-29: any "Bearer x" header used to regenerate the month's
+    list. Tokens are now verified with Supabase Auth and Admin actions check
+    ADMIN_EMAILS."""
+    import asyncio
+    from fastapi import HTTPException
+    from backend import database, main
+    from backend.config import settings
+    from backend.pipeline import pipeline_store as ps
+    real_pu, real_vu, real_admins = ps.per_user, database.verify_user, settings.admin_emails
+    ps.per_user = lambda: True
+    try:
+        database.verify_user = lambda tok: None                       # forged / expired
+        for call in (lambda: main.regenerate_bd_list(authorization="Bearer x"),
+                     lambda: main.get_bd_list(authorization="Bearer x")):
+            try:
+                asyncio.run(call())
+                raise AssertionError("a forged token was accepted")
+            except HTTPException as e:
+                assert e.status_code == 401, e.status_code
+        database.verify_user = lambda tok: {"id": "u1", "email": "bd@acer.example"}
+        settings.admin_emails = "head@acer.example"
+        for call in (lambda: main.regenerate_bd_list(authorization="Bearer ok"),
+                     lambda: main.pipeline_team(authorization="Bearer ok"),
+                     lambda: main.get_saved_leads(scope="all", authorization="Bearer ok")):
+            try:
+                asyncio.run(call())
+                raise AssertionError("a non-admin reached an Admin action")
+            except HTTPException as e:
+                assert e.status_code == 403, e.status_code
+    finally:
+        ps.per_user, database.verify_user, settings.admin_emails = real_pu, real_vu, real_admins
 
 
 def test_per_user_pipeline_refuses_an_anonymous_caller():

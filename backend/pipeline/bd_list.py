@@ -39,12 +39,11 @@ from pathlib import Path
 from backend import database
 from backend.pipeline import acer_book, news_archive
 from backend.pipeline import news_classify as nc
-from backend.pipeline.pipeline_store import STAGES, norm_name
+from backend.pipeline.pipeline_store import STAGES, StoreUnavailable, norm_name
 
 log = logging.getLogger("acer-iq.bd_list")
 
 DB_PATH = Path(__file__).parent.parent / "registry" / "data" / "pipeline.sqlite"
-_ROSTER_PATH = Path(__file__).parent.parent / "data" / "bd_roster.json"
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS bd_lists (
@@ -74,18 +73,19 @@ NOT_VISIBLE = "not visible (CRISIL/ICRA/Infomerics not in feed)"
 IN_PROGRESS = {"Contacted", "Meeting", "Proposal"}
 
 
-def roster() -> list[dict]:
-    """The BDs, in draft order, with the sectors their segment owns."""
-    try:
-        data = json.loads(_ROSTER_PATH.read_text(encoding="utf-8"))
-        return [b for b in data if b.get("id") and b.get("name")]
-    except Exception as e:
-        log.error("bd_roster.json unreadable: %s", e)
-        return []
+from backend.pipeline.roster import roster  # noqa: E402  (shared with pipeline_store)
 
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+def today_ist() -> date:
+    """ACER's day. Render runs in UTC, so date.today() there is a day behind
+    for five and a half hours every morning - and on the 1st, the whole
+    month switch would be (review 2026-09-29)."""
+    from zoneinfo import ZoneInfo
+    return datetime.now(ZoneInfo("Asia/Kolkata")).date()
 
 
 # -- field derivations (pure) -------------------------------------------------------
@@ -151,7 +151,7 @@ def _parse_date(s: str) -> date | None:
 def urgency(signals: list[dict], today: date | None = None) -> str:
     """Spec 2: This week if a debt raise is live, a maturity is <= 60 days
     away, or a rating action is <= 14 days old; else This month."""
-    today = today or date.today()
+    today = today or today_ist()
     for s in signals:
         d = _parse_date(s.get("event_date") or s.get("read_at", ""))
         if s["kind"] == "debt_raise" and d and (today - d).days <= 14:
@@ -209,17 +209,22 @@ def build_rows(companies: dict[str, dict], exclude: set[str], bds: list[dict],
     prev_rows = {r["key"]: r for r in (prev or {}).get("rows", [])}
     prev_out = (prev or {}).get("outcomes") or {}
 
+    def stage_of(p):
+        o = prev_out.get(p["company_name"], {})
+        return o.get("stage") if isinstance(o, dict) else o
+
+    # Last month's names still being worked stay with their owner, whether or
+    # not a fresh signal names them this month (spec 5). Names that ended at
+    # Mandated or Lost are done - never re-listed.
+    done = {k for k, p in prev_rows.items() if stage_of(p) in ("Mandated", "Lost")}
+    carried_in = [(k, p, stage_of(p)) for k, p in prev_rows.items() if stage_of(p) in IN_PROGRESS]
+    carried_keys = {k for k, _, _ in carried_in}
+
     candidates = []
-    carried_in = []
     for key, c in companies.items():
-        if key in exclude or c.get("blocked"):
+        if key in exclude or c.get("blocked") or key in done or key in carried_keys:
             continue
         p = prev_rows.get(key)
-        outcome = prev_out.get(p["company_name"], {}) if p else {}
-        stage = outcome.get("stage") if isinstance(outcome, dict) else outcome
-        if p and stage in IN_PROGRESS:
-            carried_in.append((key, c, p, stage))       # stays with its owner, no slot
-            continue
         if not c["signals"]:
             continue
         kinds = {s["kind"] for s in c["signals"]}
@@ -302,23 +307,35 @@ def build_rows(companies: dict[str, dict], exclude: set[str], bds: list[dict],
         rnd += 1
 
     # 3. Last month's names still being worked stay with their owner.
-    for key, c, p, stage in carried_in:
+    for key, p, stage in carried_in:
         bd = by_id.get(p.get("bd_id"))
-        if bd:
-            c = c if c["signals"] else dict(c, signals=[{
-                "kind": p.get("trigger", "macro"), "text": "still being worked from last month",
-                "source": f"BD list {prev.get('month', '')}", "url": "", "read_at": ""}])
-            rows.append(make_row(key, c, p.get("score", 0), bd, p.get("segment", ""),
-                                 in_progress=stage))
+        if not bd or key in exclude:
+            continue
+        c = companies.get(key)
+        if not c or not c["signals"]:
+            # No fresh signal this month: carry last month's reasons forward.
+            c = {"name": p["company_name"], "cin": p.get("cin", ""), "winnability": p.get("winnability"),
+                 "is_lender": p.get("instrument") in ("NCD", "CP"), "win_reason": "",
+                 "agency": "", "latest_rating": "", "contact": p.get("contact_route", ""),
+                 "acer_history": p.get("acer_history", ""),
+                 "signals": [{"kind": p.get("trigger", "macro"),
+                              "text": f"still being worked from {prev.get('month', 'last month')} ({stage})",
+                              "source": f"BD list {prev.get('month', '')}", "url": "",
+                              "read_at": prev.get("generated_at", "")}]}
+        rows.append(make_row(key, c, p.get("score", 0), bd, p.get("segment", ""),
+                             in_progress=stage))
 
     # Rank within each BD, best first; in-progress names after new ones.
     rows.sort(key=lambda r: (r["bd_id"], r["in_progress"] is not None, -r["score"], r["company_name"]))
     for b in bds:
         for i, r in enumerate(x for x in rows if x["bd_id"] == b["id"]):
             r["rank"] = i + 1
+    down = [k for k, v in inputs.items() if not k.startswith("_") and v.get("status") != "ok"]
+    why_short = (f"inputs down ({', '.join(down)}) - names they would add are missing"
+                 if down else "segment thin this month")
     fill = {b["id"]: {"filled": filled[b["id"]], "of": per_bd,
                       "note": "" if filled[b["id"]] >= per_bd else
-                      f"{filled[b['id']]} of {per_bd}: segment thin this month"}
+                      f"{filled[b['id']]} of {per_bd}: {why_short}"}
             for b in bds}
     return rows, fill
 
@@ -357,7 +374,7 @@ def _history() -> tuple[dict, bool]:
         return {}, False
     out: dict[str, str] = {}
     for e in (events if ok2 else []) or []:
-        if e.get("event") == "stage" and "-> Lost" in (e.get("detail") or ""):
+        if e.get("event") == "stage" and (e.get("detail") or "").split(" | ")[0].endswith("-> Lost"):
             out[norm_name(e["company_name"])] = f"Lost before ({(e.get('at') or '')[:10]}): {e['detail']}"
     for s in saved or []:
         who = s.get("owner") or "a BD"
@@ -491,13 +508,7 @@ def _decode(r: dict) -> dict:
     return out
 
 
-def load(month: str) -> dict | None:
-    """Latest stored snapshot for `month`, or None."""
-    ok, rows = database.remote("bd_list load", lambda c: (
-        c.table(_TABLE).select("*").eq("month", month)
-        .order("version", desc=True).limit(1).execute().data))
-    if ok:
-        return _decode(rows[0]) if rows else None
+def _load_local(month: str) -> dict | None:
     try:
         with _connect() as con:
             r = con.execute("SELECT * FROM bd_lists WHERE month = ? ORDER BY version DESC"
@@ -508,11 +519,42 @@ def load(month: str) -> dict | None:
         return None
 
 
-def _store(snap: dict) -> str:
+def load(month: str) -> dict | None:
+    """Latest stored snapshot for `month`, or None.
+
+    With Supabase configured, a failed read RAISES: treating it as "not
+    found" would regenerate version 1 and overwrite the frozen list once
+    Supabase recovered (review 2026-09-29)."""
+    ok, rows = database.remote("bd_list load", lambda c: (
+        c.table(_TABLE).select("*").eq("month", month)
+        .order("version", desc=True).limit(1).execute().data))
+    if ok:
+        if rows:
+            return _decode(rows[0])
+        return _load_local(month)      # a version stored while Supabase was down
+    if database.supabase_configured():
+        raise StoreUnavailable("BD list store unreachable - not regenerating a frozen list blind")
+    try:
+        with _connect() as con:
+            r = con.execute("SELECT * FROM bd_lists WHERE month = ? ORDER BY version DESC"
+                            " LIMIT 1", (month,)).fetchone()
+        return _decode(dict(r)) if r else None
+    except Exception as e:
+        log.error("bd_list SQLite load failed: %s", e)
+        return None
+
+
+def _store(snap: dict, new: bool = True) -> str:
+    """Insert a new version (never overwrite one), or update the outcomes of
+    an existing one at month end."""
     row = {k: (json.dumps(snap[k]) if k in ("inputs", "rows", "outcomes") and snap.get(k) is not None
                else snap.get(k)) for k in _COLS}
-    ok, _ = database.remote("bd_list store", lambda c: c.table(_TABLE).upsert(
-        row, on_conflict="month,version").execute())
+    if new:
+        op = lambda c: c.table(_TABLE).insert(row).execute()  # noqa: E731
+    else:
+        op = lambda c: (c.table(_TABLE).update({"outcomes": row["outcomes"]})  # noqa: E731
+                        .eq("month", row["month"]).eq("version", row["version"]).execute())
+    ok, _ = database.remote("bd_list store", op)
     if ok:
         return "supabase"
     with _connect() as con:
@@ -523,7 +565,7 @@ def _store(snap: dict) -> str:
 
 
 def month_key(d: date | None = None) -> str:
-    return (d or date.today()).strftime("%Y-%m")
+    return (d or today_ist()).strftime("%Y-%m")
 
 
 def _prev_month(month: str) -> str:
@@ -553,6 +595,13 @@ async def get_or_generate(month: str | None = None, force: bool = False) -> dict
             prev = await asyncio.to_thread(record_outcomes, prev)
 
         by, inputs = await _gather()
+        if prev and not prev.get("outcomes"):
+            # Without last month's outcomes every name would look untouched and
+            # in-progress names would be handed to another BD. Skip rollover
+            # and say so, rather than reshuffle blind (review 2026-09-29).
+            inputs["rollover"] = {"status": "unreachable",
+                                  "detail": "last month's outcomes unreadable - rollover skipped"}
+            prev = None
         rows, fill = build_rows(by, set(acer_book.client_names()), roster(), prev, inputs)
         snap = {"month": month, "version": (existing or {}).get("version", 0) + 1,
                 "generated_at": _now_iso(), "inputs": inputs | {"_fill": fill},
@@ -577,14 +626,21 @@ def outcomes_from(rows: list[dict], saved: list[dict], events: list[dict],
         at = (e.get("at") or "")[:10]
         if e.get("event") != "stage" or not (start <= at < end):
             continue
-        to = (e.get("detail") or "").split("->")[-1].split("|")[0].strip()
+        # The trigger appends " | {json}" of free-text fields, which may itself
+        # contain "->" - cut that off first (review 2026-09-29).
+        to = (e.get("detail") or "").split(" | ")[0].split("->")[-1].strip()
         k = norm_name(e.get("company_name", ""))
         reached[k] = max(reached.get(k, -1), _stage_rank(to))
     current = {norm_name(s["company_name"]): s for s in saved or []}
     out = {}
     for r in rows:
         k = r["key"]
-        best = max(reached.get(k, -1), _stage_rank(current.get(k, {}).get("stage", "")))
+        cur = current.get(k, {})
+        # The current stage counts only if it was set before the month ended;
+        # a move on the 2nd belongs to the new month (spec 5).
+        cur_rank = (_stage_rank(cur.get("stage", ""))
+                    if cur and (cur.get("updated_at") or "")[:10] < end else -1)
+        best = max(reached.get(k, -1), cur_rank)
         stage = STAGES[best] if best >= 0 else "not worked"
         out[r["company_name"]] = {"stage": stage, "touched": best > 0,
                                   "bd_id": r["bd_id"], "bd_name": r["bd_name"]}
@@ -603,7 +659,7 @@ def record_outcomes(snap: dict) -> dict:
         events, ok2 = pipeline_store._local_events(None, 5000), True
     else:
         ok, saved = database.remote("bd_list outcomes read", lambda c: database.select_all(
-            c, "saved_leads", "company_name,user_id,stage", ("user_id", "company_name")))
+            c, "saved_leads", "company_name,user_id,stage,updated_at", ("user_id", "company_name")))
         ok2, events = (database.remote("bd_list outcomes events read", lambda c: database.select_all(
             c, "lead_events", "id,company_name,event,detail,at", ("id",))) if ok else (False, []))
     if not ok:
@@ -628,7 +684,7 @@ def record_outcomes(snap: dict) -> dict:
                                           f"BD list {snap['month']} ({r['bd_name']}): "
                                           f"{outcomes[r['company_name']]['stage']}")
     snap = snap | {"outcomes": outcomes}
-    _store(snap)
+    _store(snap, new=False)
     return snap
 
 
@@ -676,7 +732,10 @@ def _demo() -> None:
     assert by["Omega Widgets Ltd"]["segment"] == "Unclassified"
     assert by["Omega Widgets Ltd"]["bd_id"] != "hema"
     # Never padded: thin segments say so.
-    assert fill["avinash"]["note"].endswith("segment thin this month"), fill
+    # Short because an input was down - said so, not blamed on a thin segment.
+    assert "inputs down (refinance)" in fill["avinash"]["note"], fill
+    _, fill_ok = build_rows(data, set(), bds, today=today, inputs={"queue": {"status": "ok"}})
+    assert fill_ok["avinash"]["note"].endswith("segment thin this month"), fill_ok
     # Spec 2 fields, gaps labelled, never blank.
     b = by["Beta Steel Ltd"]
     assert b["instrument"] == "NCD" and b["trigger"] == "debt_raise", b
@@ -705,9 +764,27 @@ def _demo() -> None:
     bs = [r for r in rows2 if r["company_name"] == "Beta Steel Ltd"][0]
     assert bs["carried_over"] and bs["bd_id"] != "avinash", bs
 
+    # A name at Meeting with no fresh signal still rolls over to its owner;
+    # a Mandated one is never re-listed.
+    data_nofresh = {k: v for k, v in data.items() if k != norm_name("Gamma Realty Ltd")}
+    prev2 = {"month": "2026-08", "rows": [dict(by["Gamma Realty Ltd"]), dict(by["Beta Steel Ltd"])],
+             "outcomes": {"Gamma Realty Ltd": {"stage": "Meeting"},
+                          "Beta Steel Ltd": {"stage": "Mandated"}}}
+    rows3, _ = build_rows(data_nofresh, set(), bds, prev=prev2, today=today)
+    names3 = {r["company_name"]: r for r in rows3}
+    assert names3["Gamma Realty Ltd"]["in_progress"] == "Meeting", names3.get("Gamma Realty Ltd")
+    assert "Beta Steel Ltd" not in names3, "a Mandated name was re-listed"
+
+    # A "->" inside the recorded fields does not confuse the stage parse.
+    tricky = outcomes_from([by["Beta Steel Ltd"]], [],
+                           [{"company_name": "Beta Steel Ltd", "event": "stage",
+                             "detail": 'Contacted -> Meeting | {"attendees_client": "CFO -> CEO"}',
+                             "at": "2026-09-20T10:00:00"}], "2026-09")
+    assert tricky["Beta Steel Ltd"]["stage"] == "Meeting", tricky
+
     # Month-end outcome = highest stage reached during the month.
     out = outcomes_from([by["Beta Steel Ltd"]],
-                        [{"company_name": "Beta Steel Ltd", "stage": "Lost"}],
+                        [{"company_name": "Beta Steel Ltd", "stage": "Lost", "updated_at": "2026-09-25"}],
                         [{"company_name": "Beta Steel Ltd", "event": "stage",
                           "detail": "Contacted -> Proposal", "at": "2026-09-20T10:00:00"}],
                         "2026-09")

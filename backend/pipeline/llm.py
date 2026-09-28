@@ -116,9 +116,16 @@ async def _live_free(client: httpx.AsyncClient) -> set[str] | None:
 async def chat(prompt: str, max_tokens: int = 600) -> str | None:
     """Send a prompt to the first provider/model that answers. Returns None when
     no provider is configured or all of them fail."""
+    text, _ = await chat_with_model(prompt, max_tokens)
+    return text
+
+
+async def chat_with_model(prompt: str, max_tokens: int = 600) -> tuple[str | None, str]:
+    """(text, "provider/model that answered"). Per call, so concurrent requests
+    never credit each other's model (review 2026-09-29)."""
     providers = _providers()
     if not providers:
-        return None
+        return None, ""
 
     async with httpx.AsyncClient(timeout=60) as client:
         attempts: list[dict] = []
@@ -167,7 +174,7 @@ async def chat(prompt: str, max_tokens: int = 600) -> str | None:
                 last_answer.update(provider=p["name"], model=p["model"],
                                    at=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()))
                 source_health.record(f"AI ({p['name']})", True)
-                return text
+                return text, p["model"] or p["name"]
             except Exception as e:
                 log.warning("%s/%s call failed: %s: %s", p["name"], p["model"],
                             type(e).__name__, e)
@@ -176,7 +183,7 @@ async def chat(prompt: str, max_tokens: int = 600) -> str | None:
         source_health.record(f"AI ({name})", False, error="no model answered")
     log.warning("all %d LLM attempt(s) failed", len(attempts))
     last_answer.clear()
-    return None
+    return None, ""
 
 
 def parse_json(raw: str) -> dict | None:
