@@ -28,8 +28,6 @@ Self-check (temp DB, no network):  python -m backend.pipeline.action_history
 from __future__ import annotations
 
 import logging
-import sqlite3
-from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -58,23 +56,10 @@ CREATE INDEX IF NOT EXISTS idx_actions_date ON cra_actions(date);
 _TABLE = "cra_actions"
 _KEY = ("agency", "company_name", "rating", "action", "date")
 _COLS = _KEY + ("isin", "source_url")
-# PostgREST caps a response at 1000 rows by default; read in pages below that.
-_PAGE = 1000
 
 
-@contextmanager
 def _connect():
-    """Commit-or-rollback AND close. `with sqlite3.connect(...)` only commits, so
-    without the explicit close every call leaks a file handle."""
-    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-    con = sqlite3.connect(DB_PATH)
-    con.row_factory = sqlite3.Row
-    try:
-        con.executescript(_SCHEMA)
-        with con:
-            yield con
-    finally:
-        con.close()
+    return database.sqlite_at(DB_PATH, _SCHEMA)
 
 
 def record(actions: list[dict]) -> int:
@@ -88,19 +73,13 @@ def record(actions: list[dict]) -> int:
     if not rows:
         return 0
 
-    client = database.get_client()
-    if client:
-        try:
-            # ON CONFLICT DO NOTHING: only genuinely new rows come back.
-            res = client.table(_TABLE).upsert(
-                rows, on_conflict=",".join(_KEY), ignore_duplicates=True).execute()
-            return len(res.data or [])
-        except Exception as e:
-            # Most likely supabase_schema.sql has not been run yet. SQLite
-            # keeps the row for this process's lifetime rather than losing it.
-            log.error("Supabase action_history.record failed, falling back to "
-                      "SQLite (not durable in production): %s: %s",
-                      type(e).__name__, e)
+    # ON CONFLICT DO NOTHING: only genuinely new rows come back. Most likely
+    # failure is supabase_schema.sql not yet run; SQLite then keeps the row for
+    # this process's lifetime rather than losing it.
+    ok, res = database.remote("action_history.record", lambda c: c.table(_TABLE).upsert(
+        rows, on_conflict=",".join(_KEY), ignore_duplicates=True).execute())
+    if ok:
+        return len(res.data or [])
 
     try:
         with _connect() as con:
@@ -121,25 +100,9 @@ def record(actions: list[dict]) -> int:
 def _supabase_rows() -> list[dict]:
     """Every archived row from Supabase, or [] when it is not configured or
     not reachable (logged)."""
-    client = database.get_client()
-    if not client:
-        return []
-    out: list[dict] = []
-    try:
-        start = 0
-        while True:
-            q = client.table(_TABLE).select(",".join(_COLS))
-            for c in _KEY:  # the primary key: stable order for paging
-                q = q.order(c)
-            page = q.range(start, start + _PAGE - 1).execute().data or []
-            out.extend(page)
-            if len(page) < _PAGE:
-                return out
-            start += _PAGE
-    except Exception as e:
-        log.error("Supabase action_history read failed, serving SQLite only: "
-                  "%s: %s", type(e).__name__, e)
-        return []
+    ok, rows = database.remote("action_history read", lambda c: database.select_all(
+        c, _TABLE, ",".join(_COLS), _KEY))
+    return rows if ok else []
 
 
 def _sqlite_rows() -> list[dict]:
@@ -181,18 +144,13 @@ def stats() -> dict:
     """How much history actually exists, so the UI can say so rather than imply
     a depth the archive does not have yet - and where it lives, because a
     SQLite-only archive in production is gone on the next restart."""
-    client = database.get_client()
-    if client:
-        try:
-            res = (client.table(_TABLE).select("first_seen", count="exact")
-                   .order("first_seen").limit(1).execute())
-            return {"actions": res.count or 0,
-                    "collecting_since": (res.data[0]["first_seen"]
-                                         if res.data else None),
-                    "store": "supabase", "durable": True}
-        except Exception as e:
-            log.error("Supabase action_history.stats failed, reporting SQLite: "
-                      "%s: %s", type(e).__name__, e)
+    ok, res = database.remote("action_history.stats", lambda c: (
+        c.table(_TABLE).select("first_seen", count="exact")
+        .order("first_seen").limit(1).execute()))
+    if ok:
+        return {"actions": res.count or 0,
+                "collecting_since": res.data[0]["first_seen"] if res.data else None,
+                "store": "supabase", "durable": True}
     local = {"store": "sqlite", "durable": False}
     try:
         with _connect() as con:

@@ -9,7 +9,9 @@ import QueuePage from "./components/QueuePage.jsx";
 import PipelinePage from "./components/PipelinePage.jsx";
 import ComingSoon from "./components/ComingSoon.jsx";
 import SourceHealth from "./components/SourceHealth.jsx";
+import LoginPage from "./components/LoginPage.jsx";
 import { apiUrl } from "./lib/api.js";
+import { authConfigured, supabase } from "./lib/auth.js";
 
 const TAB_INFO = {
   queue: "One ranked list, highest winnability first. Winnability is not need - every CRA sees the same downgrade at the same hour. It asks whether ACER can realistically win the mandate: first-time borrowers, issuers tagged Issuer Not Cooperating, self-withdrawn ratings, and proven multi-CRA shoppers. A credit screen sits on top and can block a lead outright - that is different from a lead simply being low winnability.",
@@ -116,7 +118,35 @@ function TabBar({ active, onChange }) {
   );
 }
 
+// Gate the app behind sign-in when Supabase auth is configured. Loading is its
+// own state so a slow session check never flashes the login form at someone
+// who is already signed in.
 export default function App() {
+  const [session, setSession] = useState(undefined);
+  const [recovery, setRecovery] = useState(false);
+
+  React.useEffect(() => {
+    if (!supabase) return;
+    supabase.auth.getSession().then(({ data }) => setSession(data.session ?? null));
+    const { data: sub } = supabase.auth.onAuthStateChange((event, s) => {
+      if (event === "PASSWORD_RECOVERY") setRecovery(true);
+      setSession(s ?? null);
+    });
+    return () => sub.subscription.unsubscribe();
+  }, []);
+
+  if (authConfigured) {
+    if (session === undefined) {
+      return <div className="flex h-screen items-center justify-center text-sm text-gray-400">Checking sign-in...</div>;
+    }
+    if (!session || recovery) {
+      return <LoginPage recovery={recovery} onRecovered={() => setRecovery(false)} />;
+    }
+  }
+  return <Workspace session={session} />;
+}
+
+function Workspace({ session }) {
   const [activeTab, setActiveTab] = useState("queue");
 
   // Find Leads (directory) state
@@ -227,7 +257,21 @@ export default function App() {
           <div>
             <span className="text-sm font-bold text-gray-900">ACER-IQ</span>
           </div>
-          <div className="ml-auto flex items-center gap-2">
+          <div className="ml-auto flex items-center gap-3">
+            {authConfigured ? (
+              <>
+                <span className="text-xs text-gray-500">{session?.user?.email}</span>
+                <button onClick={() => supabase.auth.signOut()}
+                  className="rounded-md border border-gray-200 px-2 py-1 text-xs text-gray-600 hover:bg-gray-50">
+                  Sign out
+                </button>
+              </>
+            ) : (
+              <span title="VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY are not set on this deploy"
+                className="rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] font-semibold text-amber-700">
+                Sign-in not configured
+              </span>
+            )}
             <InfoButton tabId={activeTab} />
           </div>
         </div>

@@ -52,7 +52,7 @@ cd frontend
 npm run dev   # runs on http://localhost:5173 with proxy to backend
 ```
 
-Add `VITE_GOOGLE_MAPS_API_KEY=your_key` to `frontend/.env` for the map to render.
+Add `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` (Supabase → Project Settings → API Keys, the anon/publishable key) to `frontend/.env` and to Vercel's environment variables to turn on sign-in and per-BD pipelines. Without them the app runs with no login.
 
 ---
 
@@ -107,7 +107,6 @@ In Railway dashboard → your service → Variables, add all keys from your `.en
 
 Railway will build and deploy automatically. Your app will be live at `https://your-app.up.railway.app` within ~3 minutes.
 
-> **Tip:** Add `VITE_GOOGLE_MAPS_API_KEY` as a Railway variable too, then run `npm run build` as part of your Railway build command if you want the map key injected at build time. Or add it as a static env var in `railway.toml`.
 
 ---
 

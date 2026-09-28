@@ -70,25 +70,98 @@ def get_client():
     return _client
 
 
-@contextmanager
 def _sqlite():
-    """Commit-or-rollback AND close. `with sqlite3.connect(...)` only commits,
-    so without the explicit close every call leaks a file handle."""
-    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-    con = sqlite3.connect(DB_PATH)
-    con.row_factory = sqlite3.Row
-    try:
-        con.executescript(_SCHEMA)
-        with con:
-            yield con
-    finally:
-        con.close()
+    return sqlite_at(DB_PATH, _SCHEMA)
 
 
 def backend_name() -> str:
     """Which store is actually in use - surfaced in /api/health so nobody has to
     guess whether their searches are being persisted."""
     return "supabase" if get_client() else "sqlite"
+
+
+# -- Shared durable-store helpers ---------------------------------------------
+# Every archive in this app follows one rule (PREMORTEM.md section 1): Supabase
+# when it answers, SQLite otherwise. pipeline.sqlite is gitignored and Render
+# declares no disk, so SQLite is the local-dev path and the outage safety net,
+# never the archive of record. These helpers are that rule, written once - the
+# archive modules (action_history, news_archive, source_health) call them rather
+# than each growing their own copy of the fall-through.
+
+def remote(label: str, fn):
+    """Run `fn(client)` against Supabase.
+
+    Returns (True, result) when Supabase answered, (False, None) when it is not
+    configured or the call failed. A failure is logged, never raised: the caller
+    falls through to SQLite and a missing table (schema not yet run) must not
+    take a page down with it."""
+    client = get_client()
+    if not client:
+        return False, None
+    try:
+        return True, fn(client)
+    except Exception as e:
+        log.error("Supabase %s failed, falling back to SQLite (not durable in "
+                  "production): %s: %s", label, type(e).__name__, e)
+        return False, None
+
+
+# PostgREST caps a response at 1000 rows by default; read in pages below that.
+_PAGE = 1000
+
+
+def select_all(client, table: str, cols: str, order: tuple[str, ...]) -> list[dict]:
+    """Every row of `table`, paged. `order` must be unique (the primary key) or
+    paging can skip or repeat rows. Raises - wrap it in remote()."""
+    out: list[dict] = []
+    start = 0
+    while True:
+        q = client.table(table).select(cols)
+        for c in order:
+            q = q.order(c)
+        page = q.range(start, start + _PAGE - 1).execute().data or []
+        out.extend(page)
+        if len(page) < _PAGE:
+            return out
+        start += _PAGE
+
+
+@contextmanager
+def sqlite_at(path: Path, schema: str):
+    """Commit-or-rollback AND close, with `schema` applied first. `with
+    sqlite3.connect(...)` only commits, so without the explicit close every call
+    leaks a file handle."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    con = sqlite3.connect(path)
+    con.row_factory = sqlite3.Row
+    try:
+        con.executescript(schema)
+        with con:
+            yield con
+    finally:
+        con.close()
+
+
+def user_client(token: str):
+    """A PostgREST client acting as the signed-in user, so row level security
+    applies (auth.uid() is theirs). None when Supabase is not configured.
+
+    Per request, not shared: the shared client's auth header is process-wide,
+    and swapping it between concurrent requests would hand one BD another's
+    pipeline. PostgREST verifies the JWT itself, so this backend needs no
+    signing secret."""
+    if not supabase_configured() or not token:
+        return None
+    import httpx
+    from postgrest import SyncPostgrestClient
+    base = f"{settings.supabase_url.rstrip('/')}/rest/v1"
+    headers = {"apikey": settings.supabase_key,
+               "Authorization": f"Bearer {token}",
+               "Accept": "application/json",
+               "Content-Type": "application/json"}
+    return SyncPostgrestClient(
+        base, headers=headers,
+        http_client=httpx.Client(base_url=base, headers=headers, timeout=15))
 
 
 def save_search(search_id: str, city: str, industry: str, companies: list) -> None:

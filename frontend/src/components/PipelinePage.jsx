@@ -1,9 +1,9 @@
 import React, { useState, useEffect, useCallback } from "react";
-import { apiUrl } from "../lib/api.js";
+import { apiFetch, authConfigured, openAuthed } from "../lib/auth.js";
 
-// Reads/writes the shared SQLite pipeline (backend/pipeline/pipeline_store.py)
-// via the endpoints in backend/main.py's "My Pipeline" section. One list for
-// the whole BD team - no per-user separation until auth exists.
+// Reads/writes the pipeline via backend/main.py's "My Pipeline" endpoints.
+// Per-user when Supabase is configured (the signed-in BD's token rides on every
+// call and row level security scopes the rows); otherwise one shared list.
 
 const FLAG_META = {
   first_timer:    { label: "First-timer",      color: "bg-blue-50 text-blue-700 border-blue-200" },
@@ -42,7 +42,7 @@ function WinnabilityBadge({ winnability }) {
 }
 
 async function fetchEvents(companyName) {
-  const res = await fetch(apiUrl(`/api/leads/events?company_name=${encodeURIComponent(companyName)}`));
+  const res = await apiFetch(`/api/leads/events?company_name=${encodeURIComponent(companyName)}`);
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   const data = await res.json();
   return data.events ?? [];
@@ -125,14 +125,12 @@ function LeadCard({ lead, stages, onMove, onRemove, moveError, removeError, busy
         </div>
 
         <div className="flex shrink-0 flex-col items-end gap-1.5">
-          <a
-            href={apiUrl(`/api/brief/${encodeURIComponent(lead.company_name)}`)}
-            target="_blank"
-            rel="noreferrer"
+          <button
+            onClick={() => openAuthed(`/api/brief/${encodeURIComponent(lead.company_name)}`)}
             className="rounded-lg border border-gray-200 bg-white px-2.5 py-1 text-xs font-medium text-gray-600 transition hover:bg-gray-50"
           >
             Brief
-          </a>
+          </button>
           <button
             onClick={() => setShowMove((v) => !v)}
             disabled={busy}
@@ -211,8 +209,14 @@ export default function PipelinePage() {
     setLoading(true);
     setError("");
     try {
-      const res = await fetch(apiUrl("/api/leads"));
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const res = await apiFetch("/api/leads");
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(res.status !== 401 ? body.detail ?? `HTTP ${res.status}`
+          : authConfigured ? "sign in again - your session has expired"
+          : "the server keeps a pipeline per BD, but sign-in is not configured on this "
+            + "deploy (set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY in Vercel)");
+      }
       const data = await res.json();
       setLeads(data.leads ?? []);
       setFunnelData(data.funnel ?? {});
@@ -232,7 +236,7 @@ export default function PipelinePage() {
     setBusy((b) => new Set(b).add(companyName));
     setMoveErrors((e) => ({ ...e, [companyName]: undefined }));
     try {
-      const res = await fetch(apiUrl(`/api/leads/${encodeURIComponent(companyName)}/stage`), {
+      const res = await apiFetch(`/api/leads/${encodeURIComponent(companyName)}/stage`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ stage, note }),
@@ -276,7 +280,7 @@ export default function PipelinePage() {
     setBusy((b) => new Set(b).add(companyName));
     setRemoveErrors((e) => ({ ...e, [companyName]: undefined }));
     try {
-      const res = await fetch(apiUrl(`/api/leads/${encodeURIComponent(companyName)}`), { method: "DELETE" });
+      const res = await apiFetch(`/api/leads/${encodeURIComponent(companyName)}`, { method: "DELETE" });
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
         throw new Error(body.detail ?? `HTTP ${res.status}`);
@@ -315,14 +319,12 @@ export default function PipelinePage() {
           <h2 className="text-sm font-bold text-gray-900">My Pipeline</h2>
           <div className="flex items-center gap-2">
           {leads.length > 0 && (
-            <a
-              href={apiUrl("/api/brief")}
-              target="_blank"
-              rel="noreferrer"
+            <button
+              onClick={() => openAuthed("/api/brief")}
               className="rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-medium text-gray-600 transition hover:bg-gray-50"
             >
               Print briefs
-            </a>
+            </button>
           )}
           <button
             onClick={fetchLeads}

@@ -9,7 +9,7 @@ from contextvars import ContextVar
 from pathlib import Path
 
 import httpx
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -60,7 +60,9 @@ app.add_middleware(
         None if _origins
         else r"https://[\w.-]+\.vercel\.app|http://localhost:\d+|http://127\.0\.0\.1:\d+"
     ),
-    allow_methods=["GET", "POST"],
+    # DELETE is how a lead is removed from the pipeline; without it the
+    # browser's preflight fails cross-origin and Remove silently never works.
+    allow_methods=["GET", "POST", "DELETE"],
     allow_headers=["*"],
 )
 
@@ -395,8 +397,33 @@ async def get_refinance(months: int = 9):
 
 
 # ── My Pipeline: saved leads + outcome log (ROADMAP_V3 phase 3) ──────────────
-# No accounts yet, so this is one shared list for the whole BD team. Per-user
-# separation needs auth, and no Supabase project exists yet.
+# Per-user when Supabase is configured: the caller's Supabase JWT rides in the
+# Authorization header and row level security scopes every row to them
+# (pipeline_store's per-user section). Without Supabase (local dev) it is the
+# one shared SQLite list, as before.
+
+
+def _bearer(authorization: str | None) -> str | None:
+    if authorization and authorization.lower().startswith("bearer "):
+        return authorization[7:].strip() or None
+    return None
+
+
+async def _pipeline(fn):
+    """Run a pipeline_store call, mapping its outcomes to status codes the UI
+    renders differently: sign in (401), store down (503), moved meanwhile (409).
+
+    In a worker thread: the per-user path is synchronous HTTP to Supabase, and
+    run inline it would stall every other request on the event loop."""
+    try:
+        return await asyncio.to_thread(fn)
+    except pipeline_store.AuthRequired as e:
+        raise HTTPException(status_code=401, detail=str(e))
+    except pipeline_store.StoreUnavailable as e:
+        raise HTTPException(status_code=503, detail=str(e))
+    except pipeline_store.Conflict as e:
+        raise HTTPException(status_code=409, detail=str(e))
+
 
 class SaveLeadRequest(BaseModel):
     company_name: str
@@ -414,34 +441,45 @@ class StageRequest(BaseModel):
 
 
 @app.get("/api/leads")
-async def get_saved_leads(stage: str | None = None):
-    return {"leads": pipeline_store.list_leads(stage),
-            "funnel": pipeline_store.funnel(),
-            "stages": pipeline_store.STAGES}
+async def get_saved_leads(stage: str | None = None,
+                          authorization: str | None = Header(None)):
+    tok = _bearer(authorization)
+    leads = await _pipeline(lambda: pipeline_store.list_leads(stage, token=tok))
+    counts = await _pipeline(lambda: pipeline_store.funnel(token=tok))
+    return {"leads": leads, "funnel": counts, "stages": pipeline_store.STAGES,
+            "per_user": pipeline_store.per_user()}
 
 
 @app.get("/api/leads/events")
-async def get_lead_events(company_name: str | None = None, limit: int = 200):
+async def get_lead_events(company_name: str | None = None, limit: int = 200,
+                          authorization: str | None = Header(None)):
     """The outcome log. This is what eventually lets the winnability weights be
     fitted to what actually converts, instead of staying flat guesses.
 
     Declared before /api/leads/{company_name} routes so "events" is not captured
     as a company name."""
-    return {"events": pipeline_store.events(company_name, min(max(limit, 1), 1000))}
+    tok = _bearer(authorization)
+    return {"events": await _pipeline(lambda: pipeline_store.events(
+        company_name, min(max(limit, 1), 1000), token=tok))}
 
 
 @app.post("/api/leads")
-async def add_saved_lead(req: SaveLeadRequest):
+async def add_saved_lead(req: SaveLeadRequest,
+                         authorization: str | None = Header(None)):
+    tok = _bearer(authorization)
     try:
-        return pipeline_store.save_lead(req.model_dump())
+        return await _pipeline(lambda: pipeline_store.save_lead(req.model_dump(), token=tok))
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
 
 @app.post("/api/leads/{company_name}/stage")
-async def move_saved_lead(company_name: str, req: StageRequest):
+async def move_saved_lead(company_name: str, req: StageRequest,
+                          authorization: str | None = Header(None)):
+    tok = _bearer(authorization)
     try:
-        return pipeline_store.set_stage(company_name, req.stage, req.note)
+        return await _pipeline(lambda: pipeline_store.set_stage(
+            company_name, req.stage, req.note, token=tok))
     except KeyError:
         raise HTTPException(status_code=404, detail=f"{company_name} is not saved")
     except ValueError as e:
@@ -449,8 +487,10 @@ async def move_saved_lead(company_name: str, req: StageRequest):
 
 
 @app.delete("/api/leads/{company_name}")
-async def delete_saved_lead(company_name: str):
-    if not pipeline_store.remove_lead(company_name):
+async def delete_saved_lead(company_name: str,
+                            authorization: str | None = Header(None)):
+    tok = _bearer(authorization)
+    if not await _pipeline(lambda: pipeline_store.remove_lead(company_name, token=tok)):
         raise HTTPException(status_code=404, detail=f"{company_name} is not saved")
     return {"removed": company_name}
 
@@ -459,13 +499,15 @@ async def delete_saved_lead(company_name: str):
 
 
 @app.get("/api/briefing")
-async def get_briefing(limit_per_lead: int = 8):
+async def get_briefing(limit_per_lead: int = 8,
+                       authorization: str | None = Header(None)):
     """What the papers said about the companies we are about to call.
 
     Not a market feed: it only speaks about saved leads. An unreachable set of
     publishers must read as unreachable, never as "no news", so `status` and
     `sources_fail` ride along and the UI has to render them."""
-    leads = pipeline_store.list_leads()
+    tok = _bearer(authorization)
+    leads = await _pipeline(lambda: pipeline_store.list_leads(token=tok))
     if not leads:
         return {"briefs": [], "with_news": 0, "scanned": 0, "status": "empty",
                 "sources_ok": [], "sources_fail": [],
@@ -479,7 +521,7 @@ async def get_briefing(limit_per_lead: int = 8):
 # ── Pitch brief: one printable page per company ──────────────────────────────
 
 
-async def _briefs_for(leads: list[dict]) -> list[dict]:
+async def _briefs_for(leads: list[dict], tok: str | None = None) -> list[dict]:
     """Assemble what each sheet prints: the stored lead, its history, its news.
 
     News is best-effort on purpose - a dead RSS feed must not cost someone the
@@ -488,30 +530,37 @@ async def _briefs_for(leads: list[dict]) -> list[dict]:
     data = await _safe(build_briefing(leads), {"briefs": []}, "rss_news")
     for b in data.get("briefs", []):
         news_by_company[b["company_name"]] = b.get("items", [])
-    return [{"lead": lead,
-             "events": pipeline_store.events(lead["company_name"], limit=12),
-             "news": news_by_company.get(lead["company_name"], [])}
-            for lead in leads]
+    out = []
+    for lead in leads:
+        name = lead["company_name"]
+        history = await _pipeline(
+            lambda: pipeline_store.events(name, limit=12, token=tok))
+        out.append({"lead": lead, "events": history,
+                    "news": news_by_company.get(name, [])})
+    return out
 
 
 @app.get("/api/brief", response_class=HTMLResponse)
-async def brief_pack(stage: str | None = None):
+async def brief_pack(stage: str | None = None,
+                     authorization: str | None = Header(None)):
     """The whole pipeline as a print-ready pack, one A4 sheet per company.
 
     HTML, not a PDF binary: the browser's print-to-PDF makes the file, which
     keeps a PDF engine out of the dependency list entirely."""
-    leads = pipeline_store.list_leads(stage)
-    return pitch_brief.render(await _briefs_for(leads),
+    tok = _bearer(authorization)
+    leads = await _pipeline(lambda: pipeline_store.list_leads(stage, token=tok))
+    return pitch_brief.render(await _briefs_for(leads, tok),
                               title=f"ACER-IQ pitch briefs{f' - {stage}' if stage else ''}")
 
 
 @app.get("/api/brief/{company_name}", response_class=HTMLResponse)
-async def brief_one(company_name: str):
-    leads = [l for l in pipeline_store.list_leads()
+async def brief_one(company_name: str, authorization: str | None = Header(None)):
+    tok = _bearer(authorization)
+    leads = [l for l in await _pipeline(lambda: pipeline_store.list_leads(token=tok))
              if pipeline_store.norm_name(l["company_name"]) == pipeline_store.norm_name(company_name)]
     if not leads:
         raise HTTPException(status_code=404, detail=f"{company_name} is not saved")
-    return pitch_brief.render(await _briefs_for(leads),
+    return pitch_brief.render(await _briefs_for(leads, tok),
                               title=f"ACER-IQ pitch brief - {leads[0]['company_name']}")
 
 

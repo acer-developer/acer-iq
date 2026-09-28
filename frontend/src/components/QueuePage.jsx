@@ -1,12 +1,13 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { apiUrl } from "../lib/api.js";
+import { apiFetch } from "../lib/auth.js";
 
-// Saves to the shared SQLite pipeline (backend/pipeline/pipeline_store.py).
-// One list for the whole BD team: per-user lists need auth, and no Supabase
-// project exists yet. The save is idempotent server-side, so clicking Add on a
-// company already at Proposal will not reset it to Identified.
+// Saves to the signed-in BD's own pipeline (per-user via Supabase; the shared
+// SQLite list only when auth is not configured). The save is idempotent
+// server-side, so clicking Add on a company already at Proposal will not reset
+// it to Identified.
 async function saveLead(lead) {
-  const res = await fetch(apiUrl("/api/leads"), {
+  const res = await apiFetch("/api/leads", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -16,7 +17,10 @@ async function saveLead(lead) {
       agencies_seen: lead.agencies_seen,
     }),
   });
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(res.status === 401 ? "sign in to save leads" : body.detail ?? `HTTP ${res.status}`);
+  }
   return res.json();
 }
 
@@ -165,7 +169,7 @@ export default function QueuePage() {
       setLeads(data.leads ?? []);
       setCoverage(data.coverage ?? null);
       try {
-        const savedRes = await fetch(apiUrl("/api/leads"));
+        const savedRes = await apiFetch("/api/leads");
         if (savedRes.ok) {
           const s = await savedRes.json();
           setSaved(new Set((s.leads ?? []).map((l) => l.company_name)));

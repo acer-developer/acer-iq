@@ -531,6 +531,36 @@ def test_health_names_the_search_store_in_use():
     assert any(s["name"].startswith("Search store") for s in h["sources"]), h["sources"]
 
 
+def test_per_user_pipeline_refuses_an_anonymous_caller():
+    """With Supabase configured, leads are per BD. A request with no session
+    must get 401 - never the old shared SQLite list, which would mix four
+    people's pipelines and vanish on the next Render restart."""
+    import asyncio
+    from fastapi import HTTPException
+    from backend import main
+    from backend.pipeline import pipeline_store as ps
+    real = ps.per_user
+    ps.per_user = lambda: True
+    try:
+        try:
+            asyncio.run(main.get_saved_leads(authorization=None))
+            raise AssertionError("anonymous caller got a pipeline")
+        except HTTPException as e:
+            assert e.status_code == 401, e.status_code
+        assert main._bearer("Bearer abc.def") == "abc.def"
+        assert main._bearer("Basic xyz") is None
+    finally:
+        ps.per_user = real
+
+
+def test_cors_allows_delete_for_lead_removal():
+    """Remove lead is a DELETE from the Vercel origin; without it in the CORS
+    allow-list the preflight fails and the button silently does nothing."""
+    from backend import main
+    cors = [m for m in main.app.user_middleware if "CORS" in str(m.cls)][0]
+    assert "DELETE" in cors.kwargs["allow_methods"], cors.kwargs
+
+
 # -- Action history makes the `days` window real ------------------------------
 
 def test_history_dedupes_a_refetched_page():

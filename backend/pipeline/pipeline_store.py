@@ -30,6 +30,8 @@ from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 
+from backend import database
+
 log = logging.getLogger("acer-iq.pipeline_store")
 
 DB_PATH = Path(__file__).parent.parent / "registry" / "data" / "pipeline.sqlite"
@@ -149,7 +151,7 @@ def _event(con: sqlite3.Connection, company: str, event: str,
         (company, event, detail, winnability, json.dumps(flags or {}), _now()))
 
 
-def save_lead(lead: dict) -> dict:
+def _local_save_lead(lead: dict) -> dict:
     """Save a lead at stage Identified, or return the existing one untouched.
 
     Idempotent on purpose: two people clicking Add on the same company must not
@@ -193,7 +195,7 @@ def save_lead(lead: dict) -> dict:
             "already_saved": False, "matched_on": ""}
 
 
-def set_stage(company_name: str, stage: str, note: str = "") -> dict:
+def _local_set_stage(company_name: str, stage: str, note: str = "") -> dict:
     """Move a lead along the pipeline. Unknown stages are refused rather than
     written, or the funnel silently grows categories nobody can report on."""
     if stage not in STAGES:
@@ -214,7 +216,7 @@ def set_stage(company_name: str, stage: str, note: str = "") -> dict:
     return {"company_name": company_name, "stage": stage}
 
 
-def remove_lead(company_name: str) -> bool:
+def _local_remove_lead(company_name: str) -> bool:
     """Drop a lead from the working list. The event history is deliberately kept:
     that a lead was worked and dropped is exactly the outcome data the scoring
     weights need."""
@@ -228,7 +230,7 @@ def remove_lead(company_name: str) -> bool:
         return True
 
 
-def list_leads(stage: str | None = None) -> list[dict]:
+def _local_list_leads(stage: str | None = None) -> list[dict]:
     with _connect() as con:
         if stage:
             rows = con.execute(
@@ -240,14 +242,14 @@ def list_leads(stage: str | None = None) -> list[dict]:
     return [_decode(r) for r in rows]
 
 
-def saved_names() -> set[str]:
+def _local_saved_names() -> set[str]:
     """Just the names, so the queue can mark rows already in the pipeline
     without shipping the whole saved list to the browser."""
     with _connect() as con:
         return {r[0] for r in con.execute("SELECT company_name FROM saved_leads")}
 
 
-def funnel() -> dict:
+def _local_funnel() -> dict:
     """Counts per stage, every stage present even at zero so a dashboard does not
     silently drop the empty ones."""
     with _connect() as con:
@@ -259,7 +261,7 @@ def funnel() -> dict:
     return counts
 
 
-def events(company_name: str | None = None, limit: int = 200) -> list[dict]:
+def _local_events(company_name: str | None = None, limit: int = 200) -> list[dict]:
     with _connect() as con:
         if company_name:
             rows = con.execute(
@@ -272,7 +274,340 @@ def events(company_name: str | None = None, limit: int = 200) -> list[dict]:
     return [dict(r) | {"flags": json.loads(r["flags"] or "{}")} for r in rows]
 
 
+# -- Per-user store on Supabase (PREMORTEM.md sections 1 and 7) ---------------
+# With Supabase configured every call acts as the signed-in BD: the backend
+# forwards their JWT, PostgREST verifies it, and row level security scopes every
+# read and write to auth.uid(). So one BD can neither see nor move another's
+# leads, and every lead_events row is attributable - which is what the outcome
+# data that will fit the winnability weights needs.
+#
+# There is deliberately NO SQLite fall-through here. A per-user list that
+# silently dropped to one shared, ephemeral file would mix four people's
+# pipelines and lose them on the next restart - worse than an honest error.
+# Without Supabase configured at all (local dev) the SQLite path above is the
+# whole store, exactly as before.
+
+
+class AuthRequired(Exception):
+    """No valid session: the caller must sign in (HTTP 401)."""
+
+
+class StoreUnavailable(Exception):
+    """Supabase is configured but did not answer (HTTP 503)."""
+
+
+class Conflict(Exception):
+    """The row changed between read and write (HTTP 409)."""
+
+
+def _client(token: str | None):
+    if not token:
+        raise AuthRequired("sign in to use the pipeline")
+    return database.user_client(token)
+
+
+def _call(label: str, fn):
+    """Run one PostgREST call, translating failures into the three outcomes a
+    caller has to tell apart."""
+    try:
+        return fn()
+    except (AuthRequired, Conflict, KeyError, ValueError):
+        raise
+    except Exception as e:
+        text = f"{type(e).__name__}: {e}"
+        # PGRST301/302/303: JWT missing, expired or invalid.
+        if "JWT" in text or "PGRST30" in text or "401" in text:
+            raise AuthRequired("session expired - sign in again") from e
+        log.error("pipeline %s failed: %s", label, text)
+        raise StoreUnavailable(f"pipeline store unreachable ({label})") from e
+
+
+def _match(rows: list[dict], name: str, cin: str = ""):
+    """Same identity rule as the SQLite path's _find: CIN first, folded name
+    second. Done in Python because a BD's list is tens of rows, not thousands.
+    ponytail: re-reads the user's whole list per save; fine at BD scale, move
+    to a `norm` column + index if a list ever grows into the thousands."""
+    cin = (cin or "").strip().upper()
+    if cin:
+        for r in rows:
+            if (r.get("cin") or "").upper() == cin:
+                return r, "cin"
+    key = norm_name(name)
+    for r in rows:
+        if norm_name(r.get("company_name", "")) == key:
+            return r, "name"
+    return None, ""
+
+
+def _remote_decode(r: dict) -> dict:
+    d = {k: v for k, v in r.items() if k != "user_id"}
+    d["flags"] = d.get("flags") or {}
+    d["agencies"] = d.get("agencies") or []
+    d.setdefault("cin", None)
+    return d
+
+
+def _remote_rows(c, stage: str | None = None) -> list[dict]:
+    q = c.table("saved_leads").select("*").order("updated_at", desc=True)
+    if stage:
+        q = q.eq("stage", stage)
+    return q.execute().data or []
+
+
+def _remote_event(c, company: str, event: str, detail: str = "",
+                  winnability=None, flags=None) -> None:
+    # user_id defaults to auth.uid() server-side; never sent from here.
+    c.table("lead_events").insert({
+        "company_name": company, "event": event, "detail": detail,
+        "winnability": winnability, "flags": flags or {}, "at": _now()}).execute()
+
+
+def _remote_save(c, lead: dict) -> dict:
+    name = (lead.get("company_name") or "").strip()
+    if not name:
+        raise ValueError("company_name is required")
+    cin = (lead.get("cin") or "").strip().upper()
+    existing, matched_on = _match(_remote_rows(c), name, cin)
+    if existing:
+        if cin and not existing.get("cin"):
+            try:  # the cin column arrives with the schema update; optional
+                c.table("saved_leads").update({"cin": cin}).eq(
+                    "company_name", existing["company_name"]).execute()
+                existing["cin"] = cin
+            except Exception as e:
+                log.warning("could not store CIN (schema not updated?): %s", e)
+        return _remote_decode(existing) | {"already_saved": True,
+                                           "matched_on": matched_on}
+    now = _now()
+    flags = lead.get("flags") or {}
+    row = {"company_name": name, "stage": "Identified",
+           "winnability": lead.get("winnability"), "flags": flags,
+           "agencies": lead.get("agencies_seen") or [], "notes": "",
+           "saved_at": now, "updated_at": now}
+    try:
+        c.table("saved_leads").insert(row | ({"cin": cin} if cin else {})).execute()
+    except Exception as e:
+        text = str(e)
+        if "23505" in text or "duplicate key" in text:
+            # Two tabs clicked Add at once: the other one won. Same answer as
+            # the idempotent path, not an error.
+            existing, matched_on = _match(_remote_rows(c), name, cin)
+            if existing:
+                return _remote_decode(existing) | {"already_saved": True,
+                                                   "matched_on": matched_on}
+            raise
+        if cin and "cin" in text:
+            c.table("saved_leads").insert(row).execute()
+        else:
+            raise
+    _remote_event(c, name, "saved", "added from queue", lead.get("winnability"), flags)
+    return {"company_name": name, "cin": cin or None, "stage": "Identified",
+            "already_saved": False, "matched_on": ""}
+
+
+def _remote_set_stage(c, company_name: str, stage: str, note: str) -> dict:
+    if stage not in STAGES:
+        raise ValueError(f"unknown stage {stage!r}; expected one of {STAGES}")
+    row, _ = _match(_remote_rows(c), company_name)
+    if row is None:
+        raise KeyError(company_name)
+    patch = {"stage": stage, "updated_at": _now()}
+    if note:
+        patch["notes"] = note
+    # Compare-and-set on the old stage: two tabs moving the same lead must not
+    # both "win" and leave the event log disagreeing with the row.
+    res = (c.table("saved_leads").update(patch)
+           .eq("company_name", row["company_name"]).eq("stage", row["stage"])
+           .execute())
+    if not res.data:
+        raise Conflict(f"{row['company_name']} was moved meanwhile - reload")
+    _remote_event(c, row["company_name"], "stage", f"{row['stage']} -> {stage}",
+                  row.get("winnability"), row.get("flags") or {})
+    return {"company_name": row["company_name"], "stage": stage}
+
+
+def _remote_remove(c, company_name: str) -> bool:
+    row, _ = _match(_remote_rows(c), company_name)
+    if row is None:
+        return False
+    c.table("saved_leads").delete().eq("company_name", row["company_name"]).execute()
+    _remote_event(c, row["company_name"], "removed")
+    return True
+
+
+def _remote_events(c, company_name: str | None, limit: int) -> list[dict]:
+    q = c.table("lead_events").select("*").order("at", desc=True).limit(limit)
+    if company_name:
+        q = q.eq("company_name", company_name)
+    return [{k: v for k, v in r.items() if k != "user_id"} | {"flags": r.get("flags") or {}}
+            for r in q.execute().data or []]
+
+
+def per_user() -> bool:
+    """True when leads are per-user Supabase rows and a session is required."""
+    return database.supabase_configured()
+
+
+def _dispatch(label: str, token, remote_fn, local_fn):
+    if not per_user():
+        return local_fn()
+    c = _client(token)
+    try:
+        return _call(label, lambda: remote_fn(c))
+    finally:
+        c.session.close()
+
+
+def save_lead(lead: dict, token: str | None = None) -> dict:
+    return _dispatch("save", token, lambda c: _remote_save(c, lead),
+                     lambda: _local_save_lead(lead))
+
+
+def set_stage(company_name: str, stage: str, note: str = "",
+              token: str | None = None) -> dict:
+    return _dispatch("set_stage", token,
+                     lambda c: _remote_set_stage(c, company_name, stage, note),
+                     lambda: _local_set_stage(company_name, stage, note))
+
+
+def remove_lead(company_name: str, token: str | None = None) -> bool:
+    return _dispatch("remove", token, lambda c: _remote_remove(c, company_name),
+                     lambda: _local_remove_lead(company_name))
+
+
+def list_leads(stage: str | None = None, token: str | None = None) -> list[dict]:
+    return _dispatch("list", token,
+                     lambda c: [_remote_decode(r) for r in _remote_rows(c, stage)],
+                     lambda: _local_list_leads(stage))
+
+
+def saved_names(token: str | None = None) -> set[str]:
+    return _dispatch("names", token,
+                     lambda c: {r["company_name"] for r in _remote_rows(c)},
+                     _local_saved_names)
+
+
+def funnel(token: str | None = None) -> dict:
+    def remote(c):
+        counts = {s: 0 for s in STAGES}
+        for r in _remote_rows(c):
+            counts[r["stage"]] = counts.get(r["stage"], 0) + 1
+        return counts
+    return _dispatch("funnel", token, remote, _local_funnel)
+
+
+def events(company_name: str | None = None, limit: int = 200,
+           token: str | None = None) -> list[dict]:
+    return _dispatch("events", token,
+                     lambda c: _remote_events(c, company_name, limit),
+                     lambda: _local_events(company_name, limit))
+
+
 # -- self-check (temp DB, no network) ----------------------------------------
+
+class _FakePostgrest:
+    """In-memory stand-in for one user's PostgREST client, for the self-check
+    only. Supports exactly the calls the per-user path makes."""
+
+    def __init__(self, tables: dict):
+        self.tables = tables
+        self.session = type("S", (), {"close": lambda self: None})()
+
+    def table(self, name):
+        return _FakeQuery(self.tables.setdefault(name, []))
+
+
+class _FakeQuery:
+    def __init__(self, rows):
+        self.rows, self.op, self.payload, self.filters = rows, "select", None, []
+        self._limit, self._order = None, None
+
+    def select(self, *_a, **_k): self.op = "select"; return self
+    def insert(self, row): self.op, self.payload = "insert", row; return self
+    def update(self, patch): self.op, self.payload = "update", patch; return self
+    def delete(self): self.op = "delete"; return self
+    def eq(self, col, val): self.filters.append((col, val)); return self
+    def limit(self, n): self._limit = n; return self
+
+    def order(self, col, desc=False):
+        self._order = (col, desc)
+        return self
+
+    def _hit(self, r):
+        return all(r.get(c) == v for c, v in self.filters)
+
+    def execute(self):
+        res = type("R", (), {})()
+        if self.op == "insert":
+            if any(r.get("company_name") == self.payload.get("company_name")
+                   for r in self.rows if "stage" in r):
+                raise RuntimeError("23505 duplicate key value")
+            self.rows.append(dict(self.payload))
+            res.data = [self.payload]
+        elif self.op == "update":
+            hit = [r for r in self.rows if self._hit(r)]
+            for r in hit:
+                r.update(self.payload)
+            res.data = hit
+        elif self.op == "delete":
+            hit = [r for r in self.rows if self._hit(r)]
+            self.rows[:] = [r for r in self.rows if not self._hit(r)]
+            res.data = hit
+        else:
+            hit = [dict(r) for r in self.rows if self._hit(r)]
+            if self._order:
+                col, desc = self._order
+                hit.sort(key=lambda r: r.get(col) or "", reverse=desc)
+            res.data = hit[: self._limit] if self._limit else hit
+        return res
+
+
+def _demo_remote() -> None:
+    """The per-user path, against the in-memory fake."""
+    real_per_user, real_uc = globals()["per_user"], database.user_client
+    tables: dict = {}
+    globals()["per_user"] = lambda: True
+    database.user_client = lambda token: _FakePostgrest(tables)
+    try:
+        try:
+            list_leads(token=None)
+            raise AssertionError("no token must mean sign in, not a shared list")
+        except AuthRequired:
+            pass
+        t = "jwt"
+        first = save_lead({"company_name": "Berar Finance Limited",
+                           "winnability": 50, "flags": {"inc_tagged": True}}, token=t)
+        assert first["already_saved"] is False
+        dup = save_lead({"company_name": "Berar Finance Ltd"}, token=t)
+        assert dup["already_saved"] and dup["matched_on"] == "name", dup
+        assert set_stage("Berar Finance Ltd", "Contacted", "called CFO", token=t)["stage"] == "Contacted"
+        assert funnel(token=t)["Contacted"] == 1
+        assert list_leads(token=t)[0]["notes"] == "called CFO"
+        assert saved_names(token=t) == {"Berar Finance Limited"}
+        try:
+            set_stage("Berar Finance Ltd", "Nearly", token=t)
+            raise AssertionError("unknown stage should be refused")
+        except ValueError:
+            pass
+        assert remove_lead("Berar Finance Limited", token=t) is True
+        assert remove_lead("Berar Finance Limited", token=t) is False
+        hist = [e["event"] for e in events("Berar Finance Limited", token=t)]
+        assert sorted(hist) == ["removed", "saved", "stage"], hist
+
+        # An unreachable Supabase is an error the UI can name, never a
+        # silent fall back to the shared file.
+        def broken(_token):
+            raise RuntimeError("connection refused")
+        database.user_client = lambda token: type("C", (), {
+            "table": lambda self, n: broken(n),
+            "session": type("S", (), {"close": lambda self: None})()})()
+        try:
+            list_leads(token=t)
+            raise AssertionError("an outage must raise StoreUnavailable")
+        except StoreUnavailable:
+            pass
+    finally:
+        globals()["per_user"], database.user_client = real_per_user, real_uc
 
 def _demo() -> None:
     import tempfile
@@ -351,6 +686,7 @@ def _demo() -> None:
             except ValueError:
                 pass
 
+            _demo_remote()
             print("pipeline_store self-check: ok")
         finally:
             DB_PATH = real

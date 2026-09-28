@@ -44,6 +44,10 @@ create table if not exists public.saved_leads (
     primary key (user_id, company_name)
 );
 
+-- Added 2026-09-29: CIN is the only true company identity, so a lead saved
+-- under two spellings still collapses to one row when a source gave a CIN.
+alter table public.saved_leads add column if not exists cin text;
+
 
 -- ---------------------------------------------------------------------------
 -- lead_events: the outcome log
