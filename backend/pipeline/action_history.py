@@ -70,6 +70,8 @@ def record(actions: list[dict]) -> int:
     now = datetime.now(timezone.utc).isoformat(timespec="seconds")
     rows = [{c: a.get(c, "") or "" for c in _COLS} | {"first_seen": now}
             for a in (actions or []) if a.get("agency") and a.get("company_name")]
+    for r in rows:
+        r["source_url"] = database.safe_url(r["source_url"])
     if not rows:
         return 0
 

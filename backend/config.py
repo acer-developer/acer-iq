@@ -12,6 +12,11 @@ class Settings(BaseSettings):
     tokenrouter_model: str = "z-ai/glm-5.3-free"
     supabase_url: str = ""
     supabase_key: str = ""
+    # Service-role key, SERVER-SIDE ONLY (Render env, never the frontend). The
+    # backend writes the public archives with it, so the publishable key that
+    # ships in every browser bundle can read them but never write to them.
+    # Without it the archives fall back to SQLite and /api/health says so.
+    supabase_service_key: str = ""
     # Comma-separated exact origins. Empty = fall back to the regex below
     # (any *.vercel.app deploy + localhost dev), which is what prod uses.
     allowed_origins: str = ""

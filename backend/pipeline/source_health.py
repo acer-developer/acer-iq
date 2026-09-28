@@ -62,9 +62,17 @@ ALARM_AFTER = timedelta(hours=48)
 # source - the RSS feeds alone are read five at a time on every news poll.
 _PERSIST_EVERY = 600
 
+# Read only when a BD does something (CARE: per-company lookups from the queue
+# enrichment). Nobody using the tab for two days is not an outage, so these are
+# shown as stale but never page.
+ON_DEMAND = {"CRA:CARE"}
+
 _state: dict[str, dict] = {}
+_dirty: set[str] = set()
 _persisted_at: dict[str, float] = {}
 _loaded = False
+_load_tried_at = 0.0
+_RELOAD_AFTER_FAIL = 300
 _lock = threading.Lock()
 
 
@@ -90,25 +98,71 @@ def _connect():
     return database.sqlite_at(DB_PATH, _SCHEMA)
 
 
-def _load() -> None:
-    """Seed the in-process view from the durable store, once per process.
-    ponytail: a second worker's writes are not seen until restart; Render runs
-    one worker, so this is exact today. Re-read per call if that changes."""
-    global _loaded
+def _latest(*vals):
+    got = [v for v in vals if _parse(v)]
+    return max(got, key=_parse) if got else None
+
+
+def _merge(stored: dict, mem: dict) -> dict:
+    """Combine the durable row with what this process saw since boot.
+
+    The one thing that must never happen: a restart shortening an outage.
+    So a stored failing streak survives unless some success is known after
+    it began, and the earlier start of two overlapping streaks wins."""
+    out = {c: stored.get(c) for c in _COLS} | {"source": stored.get("source") or mem.get("source")}
+    out["last_attempt"] = _latest(stored.get("last_attempt"), mem.get("last_attempt"))
+    out["last_success"] = _latest(stored.get("last_success"), mem.get("last_success"))
+    mem_newer = (_parse(mem.get("last_attempt")) or datetime.min.replace(tzinfo=timezone.utc)) >= \
+                (_parse(stored.get("last_attempt")) or datetime.min.replace(tzinfo=timezone.utc))
+    latest_ok = _parse(out["last_success"])
+    if mem_newer and mem.get("last_attempt") and mem.get("failing_since") is None:
+        out.update(failing_since=None, last_error="", last_count=mem.get("last_count"))
+        return out
+    streaks = [f for f in (stored.get("failing_since"), mem.get("failing_since")) if _parse(f)]
+    # A streak only counts if no success is known after it started.
+    streaks = [f for f in streaks if latest_ok is None or _parse(f) > latest_ok]
+    out["failing_since"] = min(streaks, key=_parse) if streaks else None
+    if mem_newer and mem.get("last_error"):
+        out["last_error"] = mem["last_error"]
+    return out
+
+
+def ensure_loaded() -> bool:
+    """Load the durable history into memory, merging what was recorded since
+    boot. Blocking - call it from a thread (startup, /api/health, /api/poll),
+    never from the event loop. A failed remote read is retried later instead
+    of being mistaken for "no history": SQLite on Render is empty after every
+    restart, and trusting it would overwrite a two-day outage with "failing
+    since now" (found in review, 2026-09-28).
+    ponytail: a second worker's writes are not seen until its next reload;
+    Render runs one worker, so this is exact today."""
+    global _loaded, _load_tried_at
     if _loaded:
-        return
-    _loaded = True
+        return True
+    if time.time() - _load_tried_at < _RELOAD_AFTER_FAIL and _load_tried_at:
+        return False
+    _load_tried_at = time.time()
     ok, rows = database.remote("source_health load", lambda c: database.select_all(
         c, _TABLE, ",".join(_COLS), ("source",)))
     if not ok:
+        if database.supabase_configured():
+            return False          # durable store configured but unreadable: retry later
         try:
             with _connect() as con:
                 rows = [dict(r) for r in con.execute("SELECT * FROM source_reads")]
         except Exception as e:
             log.error("source_health SQLite load failed: %s: %s", type(e).__name__, e)
-            rows = []
-    for r in rows or []:
-        _state.setdefault(r["source"], {c: r.get(c) for c in _COLS})
+            return False
+    with _lock:
+        for r in rows or []:
+            src = r["source"]
+            _state[src] = _merge(r, _state[src]) if src in _state else {c: r.get(c) for c in _COLS}
+        _loaded = True
+        pending = [dict(_state[s]) for s in _dirty if s in _state]
+        _dirty.clear()
+    for st in pending:
+        _persist(st)
+    return True
 
 
 def _persist(st: dict) -> None:
@@ -139,11 +193,11 @@ def _persist_soon(st: dict) -> None:
 
 
 def record(source: str, ok: bool, count: int | None = None, error: str = "") -> None:
-    """One real read of `source`. Never raises - it rides along every fetch,
-    and a bookkeeping failure must not fail the fetch it describes."""
+    """One real read of `source`. Never raises and never blocks on the network:
+    it rides along every fetch, inside async code, and a bookkeeping failure
+    must not fail or stall the fetch it describes."""
     try:
         with _lock:
-            _load()
             now = _iso(_now())
             st = _state.get(source) or {c: None for c in _COLS} | {"source": source}
             was_ok = st.get("failing_since") is None and st.get("last_success") is not None
@@ -155,15 +209,18 @@ def record(source: str, ok: bool, count: int | None = None, error: str = "") -> 
                 st["failing_since"] = st.get("failing_since") or now
                 st["last_error"] = (error or "no answer")[:300]
             _state[source] = st
+            if not _loaded:
+                # History not merged yet: writing now could overwrite a longer
+                # stored outage. Held until ensure_loaded() merges it.
+                _dirty.add(source)
+                return
             changed = was_ok != ok
             due = time.time() - _persisted_at.get(source, 0) > _PERSIST_EVERY
-            if changed or due:
-                _persisted_at[source] = time.time()
-                persist = dict(st)
-            else:
-                persist = None
-        if persist:
-            _persist_soon(persist)
+            if not (changed or due):
+                return
+            _persisted_at[source] = time.time()
+            persist = dict(st)
+        _persist_soon(persist)
     except Exception as e:
         log.error("source_health.record(%s) failed: %s: %s", source, type(e).__name__, e)
 
@@ -187,7 +244,6 @@ def status(source: str, now: datetime | None = None) -> dict:
     """One source's state plus a sentence a BD can read."""
     now = now or _now()
     with _lock:
-        _load()
         st = dict(_state.get(source) or {})
     attempt, success = _parse(st.get("last_attempt")), _parse(st.get("last_success"))
     failing = _parse(st.get("failing_since"))
@@ -209,13 +265,13 @@ def status(source: str, now: datetime | None = None) -> dict:
             "failing_since": st.get("failing_since"),
             "last_error": st.get("last_error") or "",
             "last_count": st.get("last_count"),
-            "alarm": state in ("down", "stale")}
+            "on_demand": source in ON_DEMAND,
+            "alarm": state == "down" or (state == "stale" and source not in ON_DEMAND)}
 
 
 def snapshot(prefix: str = "") -> list[dict]:
     """Every known source (optionally only those starting with `prefix`)."""
     with _lock:
-        _load()
         names = sorted(n for n in _state if n.startswith(prefix))
     return [status(n) for n in names]
 
@@ -240,15 +296,22 @@ def summarise(rows: list[dict]) -> dict:
                 f"{r['source']} {r['message']}" for r in rows if r["state"] == "ok")}
 
 
+def _reset_for_test() -> None:
+    global _loaded, _load_tried_at
+    _state.clear(); _persisted_at.clear(); _dirty.clear()
+    _loaded, _load_tried_at = False, 0.0
+
+
 def _demo() -> None:
     import tempfile
-    global DB_PATH, _loaded
+    global DB_PATH
     real, real_client = DB_PATH, database.get_client
     database.get_client = lambda: None   # never touch a configured Supabase
     with tempfile.TemporaryDirectory() as tmp:
         DB_PATH = Path(tmp) / "t.sqlite"
-        _state.clear(); _persisted_at.clear(); _loaded = False
+        _reset_for_test()
         try:
+            assert ensure_loaded()
             assert status("NSE")["state"] == "never_read"
             assert summarise([])["verdict"] == "unknown"
 
@@ -276,18 +339,51 @@ def _demo() -> None:
             record("NSE", True, 3)
             assert status("NSE")["failing_since"] is None
 
-            # A source nobody polled for 48h is stale, and alarms too.
-            assert status("NSE", now=later)["state"] == "stale"
+            # A polled source nobody read for 48h is stale and alarms; an
+            # on-demand one (CARE) is stale but does not page.
+            assert status("NSE", now=later)["alarm"] is True
+            record("CRA:CARE", True)
+            care = status("CRA:CARE", now=later)
+            assert care["state"] == "stale" and care["alarm"] is False, care
 
             # "Unreachable since X" survives a restart (the durable store).
             record("BSE", False, error="timeout")
-            _state.clear(); _loaded = False
+            _reset_for_test()
+            assert ensure_loaded()
             assert status("BSE")["state"] == "failing", status("BSE")
-            assert [r["source"] for r in snapshot()] == ["BSE", "NSE"]
+
+            # Review finding: a failure recorded after a restart but before
+            # the history loads must not shorten the stored outage.
+            three_days = _iso(_now() - timedelta(days=3))
+            with _connect() as con:
+                con.execute("UPDATE source_reads SET failing_since = ?, last_success = NULL"
+                            " WHERE source = 'BSE'", (three_days,))
+            _reset_for_test()
+            record("BSE", False, error="timeout again")      # before load
+            assert ensure_loaded()
+            s = status("BSE")
+            assert s["failing_since"] == three_days and s["state"] == "down", s
+            with _connect() as con:
+                stored = con.execute("SELECT failing_since FROM source_reads"
+                                     " WHERE source = 'BSE'").fetchone()[0]
+            assert stored == three_days, stored
+
+            # A configured-but-unreachable durable store is retried, never
+            # treated as "no history".
+            _reset_for_test()
+            real_conf = database.supabase_configured
+            database.supabase_configured = lambda: True
+            database.get_client = lambda: type("C", (), {"table": lambda self, n: 1 / 0})()
+            try:
+                assert ensure_loaded() is False and not _loaded
+            finally:
+                database.supabase_configured = real_conf
+                database.get_client = lambda: None
+            assert [r["source"] for r in snapshot()] == []
             print("source_health self-check: ok")
         finally:
             DB_PATH, database.get_client = real, real_client
-            _state.clear(); _persisted_at.clear(); _loaded = False
+            _reset_for_test()
 
 
 if __name__ == "__main__":

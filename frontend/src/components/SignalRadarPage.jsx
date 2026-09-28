@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { apiUrl } from "../lib/api.js";
+import { safeUrl } from "../lib/safeUrl.js";
 
 const CATEGORY_META = {
   fund_raise:    { label: "Fund Raise",    color: "bg-blue-100 text-blue-700 border-blue-200" },
@@ -486,9 +487,9 @@ export default function SignalRadarPage() {
                       )}
                     </div>
                     <div className="shrink-0 flex items-center gap-3 pt-0.5">
-                      {(item.link || item.attachment) && (
+                      {safeUrl(item.link || item.attachment) && (
                         <a
-                          href={item.link || item.attachment}
+                          href={safeUrl(item.link || item.attachment)}
                           target="_blank"
                           rel="noreferrer"
                           className="inline-flex items-center gap-0.5 text-[11px] font-medium text-blue-600 hover:underline whitespace-nowrap"

@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { apiUrl } from "../lib/api.js";
+import { safeUrl } from "../lib/safeUrl.js";
 import { EmptyState, FreshnessStrip } from "./SourceFreshness.jsx";
 
 // Tab 3 - News, kept. Reads the archive (backend/pipeline/news_archive.py), not
@@ -66,8 +67,8 @@ function NewsRow({ item }) {
         {/* Source link + read date on every row (BUILD_PLAN invariant 2). */}
         <p className="mt-1 text-[11px] text-gray-400">
           Source:{" "}
-          {item.link ? (
-            <a href={item.link} target="_blank" rel="noreferrer" className="text-blue-600 hover:underline">
+          {safeUrl(item.link) ? (
+            <a href={safeUrl(item.link)} target="_blank" rel="noreferrer" className="text-blue-600 hover:underline">
               {item.source}
             </a>
           ) : (

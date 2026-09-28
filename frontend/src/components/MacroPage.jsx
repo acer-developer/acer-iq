@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { apiUrl } from "../lib/api.js";
+import { safeUrl } from "../lib/safeUrl.js";
 import { EmptyState, FreshnessStrip } from "./SourceFreshness.jsx";
 
 // Tab 1 - Macro. A big thing happened: who does it hit, and do they now need a
@@ -40,8 +41,8 @@ function SectorBlock({ block, inputsDown }) {
         <ul className="mt-1.5 space-y-0.5">
           {block.events.map((e, i) => (
             <li key={i} className="text-xs text-gray-600">
-              {e.link ? (
-                <a href={e.link} target="_blank" rel="noreferrer" className="font-medium text-gray-800 hover:text-blue-600 hover:underline">
+              {safeUrl(e.link) ? (
+                <a href={safeUrl(e.link)} target="_blank" rel="noreferrer" className="font-medium text-gray-800 hover:text-blue-600 hover:underline">
                   {e.subject}
                 </a>
               ) : <span className="font-medium text-gray-800">{e.subject}</span>}
@@ -75,8 +76,8 @@ function SectorBlock({ block, inputsDown }) {
                     <span key={i}>
                       {i > 0 && " · "}
                       Source:{" "}
-                      {t.url ? (
-                        <a href={t.url} target="_blank" rel="noreferrer" className="text-blue-600 hover:underline">{t.source}</a>
+                      {safeUrl(t.url) ? (
+                        <a href={safeUrl(t.url)} target="_blank" rel="noreferrer" className="text-blue-600 hover:underline">{t.source}</a>
                       ) : t.source}
                       {t.read_at && <> read {readDate(t.read_at)}</>}
                     </span>

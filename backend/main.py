@@ -69,6 +69,13 @@ app.add_middleware(
 
 _search_cache: dict[str, list[dict]] = {}
 
+
+@app.on_event("startup")
+async def _load_source_history() -> None:
+    """Merge the durable per-source history before the first fetch records
+    over it - in a thread, since it is a blocking Supabase read."""
+    await asyncio.to_thread(source_health.ensure_loaded)
+
 # Per-request tally of which enrichment sources failed, so the API can tell the
 # UI "BSE returned nothing because it errored" instead of showing a silent blank.
 # A Counter object shared through the context survives asyncio.gather (each Task
@@ -606,8 +613,8 @@ async def _refresh_news(force: bool = False) -> bool:
 
 
 def _news_link(it: dict) -> str:
-    if it.get("link"):
-        return it["link"]
+    if database.safe_url(it.get("link", "")):
+        return database.safe_url(it["link"])
     if it.get("symbol"):
         return f"https://www.nseindia.com/get-quotes/equity?symbol={it['symbol']}"
     return ""
@@ -932,8 +939,11 @@ async def health():
     # not paged on here, same treatment as the statically-blocked CRA sites.
     degraded = [s["name"] for s in sources if not s["ok"] and s["name"] != "AI scoring"]
 
+    loaded = await asyncio.to_thread(source_health.ensure_loaded)
     fresh = await asyncio.to_thread(source_health.snapshot)
     degraded += [f"{f['source']}: {f['message']}" for f in fresh if f["alarm"]]
+    if not loaded:
+        degraded.append("source history not loaded - freshness below covers this process only")
 
     archives = {"cra_actions": await asyncio.to_thread(action_history.stats),
                 "news": await asyncio.to_thread(news_archive.stats)}
@@ -978,12 +988,16 @@ async def poll():
         return {"polled": False, "reason": "polled less than 10 minutes ago",
                 "freshness": source_health.snapshot()}
     _last_poll["at"] = _time.time()
-    from backend.pipeline import cra_press
+    await asyncio.to_thread(source_health.ensure_loaded)
+    from backend.pipeline import bse_scraper, cra_press
     _news_polled["at"] = _time.time()
-    nse, rss, cra = await asyncio.gather(
+    # BSE too: the scrip master feeds Macro and refinance, and it is cached
+    # for 12h, so this is a real read at most twice a day.
+    nse, rss, cra, _ = await asyncio.gather(
         _safe(fetch_market_news(7), {}, "nse_news"),
         _safe(fetch_rss_news(), {}, "rss_news"),
-        _safe(cra_press.fetch_recent_actions(days=30), {"actions": []}, "cra_press"))
+        _safe(cra_press.fetch_recent_actions(days=30), {"actions": []}, "cra_press"),
+        _safe(bse_scraper._load_master(), {}, "bse_instruments"))
     new_actions = await asyncio.to_thread(action_history.record, cra.get("actions", []))
     return {"polled": True,
             "news_new": (nse.get("archived_new") or 0) + (rss.get("archived_new") or 0),

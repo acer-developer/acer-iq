@@ -80,7 +80,7 @@ def _row(item: dict, now: str) -> dict:
         "subject": (item.get("subject") or "")[:600],
         "description": (item.get("description") or "")[:600],
         "categories": json.dumps(item.get("categories") or []),
-        "link": (item.get("link") or item.get("attachment") or "")[:1000],
+        "link": database.safe_url(item.get("link") or item.get("attachment") or "")[:1000],
         "first_seen": now,
     }
 
@@ -120,6 +120,7 @@ def record(items: list[dict]) -> int:
 
 def _decode(r: dict) -> dict:
     d = {c: r.get(c) for c in _COLS}
+    d["link"] = database.safe_url(d.get("link") or "")
     try:
         d["categories"] = json.loads(d.get("categories") or "[]")
     except (TypeError, ValueError):
@@ -207,6 +208,10 @@ def _demo() -> None:
             assert nse["categories"] == ["fund_raise"], nse
             assert nse["link"] == "https://nse.example/b.pdf", nse
             assert nse["first_seen"][:10] == today, "read date is when we read it"
+
+            # A non-http link is never stored or served.
+            record([{"source": "X", "subject": "evil", "link": "javascript:alert(1)"}])
+            assert [r["link"] for r in since(1) if r["subject"] == "evil"] == [""]
 
             # An item with no headline and no link carries nothing to keep.
             assert record([{"source": "X"}]) == 0

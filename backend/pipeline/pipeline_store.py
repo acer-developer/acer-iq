@@ -354,14 +354,6 @@ def _remote_rows(c, stage: str | None = None) -> list[dict]:
     return q.execute().data or []
 
 
-def _remote_event(c, company: str, event: str, detail: str = "",
-                  winnability=None, flags=None) -> None:
-    # user_id defaults to auth.uid() server-side; never sent from here.
-    c.table("lead_events").insert({
-        "company_name": company, "event": event, "detail": detail,
-        "winnability": winnability, "flags": flags or {}, "at": _now()}).execute()
-
-
 def _remote_save(c, lead: dict) -> dict:
     name = (lead.get("company_name") or "").strip()
     if not name:
@@ -400,7 +392,8 @@ def _remote_save(c, lead: dict) -> dict:
             c.table("saved_leads").insert(row).execute()
         else:
             raise
-    _remote_event(c, name, "saved", "added from queue", lead.get("winnability"), flags)
+    # The lead_events row is written by the trg_log_lead_event trigger, in the
+    # same transaction as this insert (supabase_schema.sql).
     return {"company_name": name, "cin": cin or None, "stage": "Identified",
             "already_saved": False, "matched_on": ""}
 
@@ -421,8 +414,6 @@ def _remote_set_stage(c, company_name: str, stage: str, note: str) -> dict:
            .execute())
     if not res.data:
         raise Conflict(f"{row['company_name']} was moved meanwhile - reload")
-    _remote_event(c, row["company_name"], "stage", f"{row['stage']} -> {stage}",
-                  row.get("winnability"), row.get("flags") or {})
     return {"company_name": row["company_name"], "stage": stage}
 
 
@@ -431,7 +422,6 @@ def _remote_remove(c, company_name: str) -> bool:
     if row is None:
         return False
     c.table("saved_leads").delete().eq("company_name", row["company_name"]).execute()
-    _remote_event(c, row["company_name"], "removed")
     return True
 
 
@@ -514,13 +504,21 @@ class _FakePostgrest:
         self.session = type("S", (), {"close": lambda self: None})()
 
     def table(self, name):
-        return _FakeQuery(self.tables.setdefault(name, []))
+        return _FakeQuery(self.tables.setdefault(name, []), name, self.tables)
 
 
 class _FakeQuery:
-    def __init__(self, rows):
+    def __init__(self, rows, name="", tables=None):
         self.rows, self.op, self.payload, self.filters = rows, "select", None, []
         self._limit, self._order = None, None
+        self.name, self.tables = name, tables if tables is not None else {}
+
+    def _trigger(self, event, row, detail=""):
+        """What trg_log_lead_event does in Postgres."""
+        if self.name == "saved_leads":
+            self.tables.setdefault("lead_events", []).append({
+                "company_name": row["company_name"], "event": event, "detail": detail,
+                "flags": row.get("flags") or {}, "at": _now()})
 
     def select(self, *_a, **_k): self.op = "select"; return self
     def insert(self, row): self.op, self.payload = "insert", row; return self
@@ -543,15 +541,21 @@ class _FakeQuery:
                    for r in self.rows if "stage" in r):
                 raise RuntimeError("23505 duplicate key value")
             self.rows.append(dict(self.payload))
+            self._trigger("saved", self.payload, "added from queue")
             res.data = [self.payload]
         elif self.op == "update":
             hit = [r for r in self.rows if self._hit(r)]
             for r in hit:
+                old = r.get("stage")
                 r.update(self.payload)
+                if r.get("stage") != old:
+                    self._trigger("stage", r, f"{old} -> {r['stage']}")
             res.data = hit
         elif self.op == "delete":
             hit = [r for r in self.rows if self._hit(r)]
             self.rows[:] = [r for r in self.rows if not self._hit(r)]
+            for r in hit:
+                self._trigger("removed", r)
             res.data = hit
         else:
             hit = [dict(r) for r in self.rows if self._hit(r)]

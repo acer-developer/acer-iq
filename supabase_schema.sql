@@ -155,10 +155,17 @@ create policy "own leads" on public.saved_leads
     using (auth.uid() = user_id)
     with check (auth.uid() = user_id);
 
+-- The outcome log is append-only even to its owner: select and insert, never
+-- update or delete, or "what did we actually do with this lead" could be
+-- rewritten after the fact.
 drop policy if exists "own events" on public.lead_events;
-create policy "own events" on public.lead_events
-    for all
-    using (auth.uid() = user_id)
+drop policy if exists "read own events" on public.lead_events;
+create policy "read own events" on public.lead_events
+    for select
+    using (auth.uid() = user_id);
+drop policy if exists "append own events" on public.lead_events;
+create policy "append own events" on public.lead_events
+    for insert
     with check (auth.uid() = user_id);
 
 -- Searches are shared working data, not personal: any signed-in user may read
@@ -171,47 +178,73 @@ create policy "signed in searches" on public.searches
     with check (true);
 
 
--- CRA actions are public press releases, and the backend writes them with the
--- publishable key, so anon may read and insert. There is deliberately no
--- update or delete policy: the archive is append-only even to its own writer.
--- Caveat: anyone holding the publishable key can insert rows. Moving the
--- backend to the service-role key (server-side only) would close that.
+-- The public archives (cra_actions, news_archive, source_reads) are READ-ONLY
+-- to the publishable key. That key ships in every browser bundle, so a write
+-- policy for it would let anyone plant a fake rating action in the queue or
+-- a `javascript:` link in the news archive. The backend writes with the
+-- service-role key (Render env SUPABASE_SERVICE_KEY, never the frontend),
+-- which bypasses RLS. No update or delete policy exists for anyone: the
+-- archives are append-only.
 drop policy if exists "read cra actions" on public.cra_actions;
 create policy "read cra actions" on public.cra_actions
     for select
     to anon, authenticated
     using (true);
 
+-- Removed 2026-09-29 (security review): anon could insert.
 drop policy if exists "append cra actions" on public.cra_actions;
-create policy "append cra actions" on public.cra_actions
-    for insert
-    to anon, authenticated
-    with check (true);
 
 
--- News items are public publications: read + append only, like cra_actions.
 drop policy if exists "read news archive" on public.news_archive;
 create policy "read news archive" on public.news_archive
     for select to anon, authenticated using (true);
-
 drop policy if exists "append news archive" on public.news_archive;
-create policy "append news archive" on public.news_archive
-    for insert to anon, authenticated with check (true);
 
--- Source freshness is one row per source, overwritten on every read, so it
--- needs update as well. It holds no personal data - only when a public site
--- last answered.
 drop policy if exists "read source reads" on public.source_reads;
 create policy "read source reads" on public.source_reads
     for select to anon, authenticated using (true);
-
 drop policy if exists "write source reads" on public.source_reads;
-create policy "write source reads" on public.source_reads
-    for insert to anon, authenticated with check (true);
-
 drop policy if exists "update source reads" on public.source_reads;
-create policy "update source reads" on public.source_reads
-    for update to anon, authenticated using (true) with check (true);
+
+
+-- ---------------------------------------------------------------------------
+-- lead_events are written by the database, in the same transaction as the
+-- saved_leads change they describe. Two separate API calls could land one
+-- without the other (an expired session between them), leaving a stage move
+-- with no outcome row - the data the winnability weights will be fitted to.
+-- SECURITY INVOKER: the insert runs as the BD, so the RLS check above holds.
+-- ---------------------------------------------------------------------------
+create or replace function public.log_lead_event() returns trigger
+language plpgsql security invoker as $$
+begin
+    if tg_op = 'INSERT' then
+        insert into public.lead_events (company_name, user_id, event, detail, winnability, flags)
+        values (new.company_name, new.user_id, 'saved', 'added from queue', new.winnability, new.flags);
+        return new;
+    elsif tg_op = 'UPDATE' then
+        if new.stage is distinct from old.stage then
+            insert into public.lead_events (company_name, user_id, event, detail, winnability, flags)
+            values (new.company_name, new.user_id, 'stage', old.stage || ' -> ' || new.stage,
+                    new.winnability, new.flags);
+        elsif new.notes is distinct from old.notes then
+            insert into public.lead_events (company_name, user_id, event, detail, winnability, flags)
+            values (new.company_name, new.user_id, 'note', left(coalesce(new.notes, ''), 500),
+                    new.winnability, new.flags);
+        end if;
+        return new;
+    elsif tg_op = 'DELETE' then
+        insert into public.lead_events (company_name, user_id, event, detail, winnability, flags)
+        values (old.company_name, old.user_id, 'removed', '', old.winnability, old.flags);
+        return old;
+    end if;
+    return null;
+end;
+$$;
+
+drop trigger if exists trg_log_lead_event on public.saved_leads;
+create trigger trg_log_lead_event
+    after insert or update or delete on public.saved_leads
+    for each row execute function public.log_lead_event();
 
 
 -- ---------------------------------------------------------------------------

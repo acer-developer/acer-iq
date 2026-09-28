@@ -62,7 +62,10 @@ def get_client():
         return None
     try:
         from supabase import create_client
-        _client = create_client(settings.supabase_url, settings.supabase_key)
+        # The service-role key when set: it is what may write the archives
+        # (supabase_schema.sql grants the publishable key read only).
+        _client = create_client(settings.supabase_url,
+                                settings.supabase_service_key or settings.supabase_key)
     except Exception as e:
         log.error("Supabase client init failed - falling back to SQLite: %s: %s",
                   type(e).__name__, e)
@@ -144,6 +147,14 @@ def sqlite_at(path: Path, schema: str):
             yield con
     finally:
         con.close()
+
+
+def safe_url(url: str) -> str:
+    """The URL if it is http(s), else "". Links in the archives come from
+    third-party feeds; a `javascript:` href rendered as "Source" would run in
+    a BD's session. Applied on write and again on read."""
+    u = (url or "").strip()
+    return u if u.lower().startswith(("https://", "http://")) else ""
 
 
 def user_client(token: str):

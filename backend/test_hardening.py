@@ -631,6 +631,18 @@ def test_macro_degrades_and_every_name_has_reason_and_source():
     assert names and names[0]["reason"] and names[0]["triggers"][0]["url"], names
 
 
+def test_archive_links_are_http_only():
+    """Security review 2026-09-28: archive links come from third-party feeds
+    and render as "Source" hrefs; a javascript: URL would run in a BD's
+    session. Only http(s) is ever stored or served."""
+    from backend import database, main
+    assert database.safe_url("javascript:alert(1)") == ""
+    assert database.safe_url(" JAVASCRIPT:alert(1)") == ""
+    assert database.safe_url("data:text/html,x") == ""
+    assert database.safe_url("https://nse.example/a.pdf") == "https://nse.example/a.pdf"
+    assert main._news_link({"link": "javascript:x", "symbol": "ACME"}).startswith("https://www.nseindia.com/")
+
+
 def test_per_user_pipeline_refuses_an_anonymous_caller():
     """With Supabase configured, leads are per BD. A request with no session
     must get 401 - never the old shared SQLite list, which would mix four
