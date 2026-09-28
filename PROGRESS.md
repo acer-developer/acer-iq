@@ -6,7 +6,7 @@ Do not check an item that is not committed, tested and pushed.
 
 Owner: **OP** = operator (human, cannot be automated) · **NB** = nightly build.
 
-Last updated: 2026-09-28 · Phase in progress: **Phase 3 — Macro** (overnight multi-session build, operator-approved 2026-09-28)
+Last updated: 2026-09-28 · Phase in progress: **Phases 0-3 built; review fixes + operator steps** (overnight multi-session build, operator-approved 2026-09-28)
 
 ---
 
@@ -57,9 +57,9 @@ production writes are destroyed on every restart — PREMORTEM §1.
 
 ## Phase 3 — Tab 1, Macro
 
-- [ ] **NB** Macro event → sector tag
-- [ ] **NB** Join: sector × (debt maturing <9mo OR thin interest coverage) × `winnability.py`
-- [ ] **NB** Output is a named list with reason + source per name. A join, not a model.
+- [x] **NB** ~~Macro event → sector tag~~ (2026-09-28, `14ee17b` / `312ee75`; `news_classify.sectors_for` with knock-ons)
+- [x] **NB** ~~Join: sector × (debt maturing <9mo OR thin interest coverage) × `winnability.py`~~ (2026-09-28, `312ee75`; `macro.py`)
+- [x] **NB** ~~Output is a named list with reason + source per name. A join, not a model.~~ (2026-09-28, `312ee75`; Macro tab)
 
 ## Phase 4 — Tab 2, Monthly BD list *(needs Phase 0)*
 
