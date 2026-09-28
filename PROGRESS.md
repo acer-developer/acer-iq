@@ -6,7 +6,7 @@ Do not check an item that is not committed, tested and pushed.
 
 Owner: **OP** = operator (human, cannot be automated) · **NB** = nightly build.
 
-Last updated: 2026-09-28 · Phase in progress: **1**
+Last updated: 2026-09-28 · Phase in progress: **Cleanup**
 
 ---
 
@@ -18,8 +18,8 @@ touches a migration.
 
 - [x] **NB** ~~Write BUILD_PLAN.md~~ (2026-09-28)
 - [x] **NB** ~~Write PREMORTEM.md~~ (2026-09-28)
-- [ ] **NB** Delete `frontend/src/components/MapView.jsx` and its use in `App.jsx` (India map dropped)
-- [ ] **NB** Delete the stale "falls back to mock data" line in `README.md` — untrue, there is no mock data
+- [x] **NB** ~~Delete `frontend/src/components/MapView.jsx` and its use in `App.jsx` (India map dropped)~~ (2026-09-28)
+- [x] **NB** ~~Delete the stale "falls back to mock data" line in `README.md` — untrue, there is no mock data~~ (2026-09-28)
 
 ## Phase 0 — Foundations *(BLOCKING — see PREMORTEM §7)*
 

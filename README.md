@@ -22,8 +22,6 @@ SUPABASE_URL=your_url_here
 SUPABASE_KEY=your_key_here
 ```
 
-> **Note:** The app works without API keys - it falls back to mock data so you can test the UI immediately.
-
 ### 3. Install Python dependencies
 ```bash
 pip install -r requirements.txt
@@ -142,7 +140,6 @@ lead-gen-tool/
 │   │   ├── App.jsx
 │   │   └── components/
 │   │       ├── SearchBar.jsx
-│   │       ├── MapView.jsx
 │   │       ├── Sidebar.jsx
 │   │       ├── CompanyCard.jsx
 │   │       └── LeadScore.jsx

@@ -1,6 +1,5 @@
 import React, { useState } from "react";
 import SearchBar from "./components/SearchBar.jsx";
-import MapView from "./components/MapView.jsx";
 import Sidebar from "./components/Sidebar.jsx";
 import CompanyCard from "./components/CompanyCard.jsx";
 import CompanyResearchPage from "./components/company/CompanyResearchPage.jsx";
@@ -11,8 +10,6 @@ import PipelinePage from "./components/PipelinePage.jsx";
 import ComingSoon from "./components/ComingSoon.jsx";
 import SourceHealth from "./components/SourceHealth.jsx";
 import { apiUrl } from "./lib/api.js";
-
-const MAPS_API_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY ?? "";
 
 const TAB_INFO = {
   queue: "One ranked list, highest winnability first. Winnability is not need - every CRA sees the same downgrade at the same hour. It asks whether ACER can realistically win the mandate: first-time borrowers, issuers tagged Issuer Not Cooperating, self-withdrawn ratings, and proven multi-CRA shoppers. A credit screen sits on top and can block a lead outright - that is different from a lead simply being low winnability.",
@@ -124,8 +121,6 @@ export default function App() {
 
   // Find Leads (directory) state
   const [companies, setCompanies] = useState([]);
-  const [cityLat, setCityLat] = useState(20.5937);
-  const [cityLng, setCityLng] = useState(78.9629);
   const [selectedId, setSelectedId] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -137,7 +132,6 @@ export default function App() {
   const [detailOpen, setDetailOpen] = useState(false);
 
   const selectedCompany = companies.find((c) => c.id === selectedId) ?? null;
-  const activeOfficeLocations = selectedCompany?.office_locations ?? [];
   const officesFetched = React.useRef(new Set());
 
   const handleSelectCompany = (id) => {
@@ -207,8 +201,6 @@ export default function App() {
 
       const data = await res.json();
       setCompanies(data.companies ?? []);
-      setCityLat(data.city_lat);
-      setCityLng(data.city_lng);
       setSearchId(data.search_id);
       setSources(data.sources ?? []);
     } catch (e) {
@@ -305,7 +297,7 @@ export default function App() {
           )}
 
           <div className="flex flex-1 overflow-hidden">
-            <aside className="w-72 shrink-0 overflow-hidden border-r border-gray-200 bg-white md:w-80">
+            <div className="flex-1 overflow-hidden border-r border-gray-200 bg-white">
               <Sidebar
                 companies={companies}
                 loading={loading}
@@ -315,71 +307,7 @@ export default function App() {
                 city={searchLocation}
                 industry={searchDesc}
               />
-            </aside>
-
-            <main className="relative flex-1 overflow-hidden bg-gray-100">
-              <MapView
-                companies={companies}
-                cityLat={cityLat}
-                cityLng={cityLng}
-                selectedId={selectedId}
-                onSelectCompany={handleSelectCompany}
-                mapsApiKey={MAPS_API_KEY}
-                officeLocations={activeOfficeLocations}
-              />
-
-              {companies.length > 0 && !loading && (
-                <div className="pointer-events-none absolute bottom-4 left-4 rounded-xl border border-gray-200
-                  bg-white/95 px-3 py-2.5 shadow-lg backdrop-blur-sm">
-                  <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-gray-400">Legend</p>
-                  <div className="space-y-1.5">
-                    {[
-                      { color: "bg-blue-500",    label: "Bank" },
-                      { color: "bg-violet-500",  label: "NBFC" },
-                      { color: "bg-emerald-500", label: "Corporate" },
-                    ].map(({ color, label }) => (
-                      <div key={label} className="flex items-center gap-2">
-                        <span className={`h-2.5 w-2.5 rounded-full ${color}`} />
-                        <span className="text-xs text-gray-600">{label}</span>
-                      </div>
-                    ))}
-                    {activeOfficeLocations.length > 0 && (
-                      <div className="flex items-center gap-2 border-t border-gray-100 pt-1.5 mt-0.5">
-                        <span className="h-2.5 w-2.5 rounded-full bg-cyan-400" />
-                        <span className="text-xs text-gray-600">Branch office</span>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              )}
-
-              {!loading && companies.length === 0 && !error && (
-                <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
-                  <div className="rounded-2xl border border-gray-200 bg-white px-8 py-7 text-center shadow-xl">
-                    <div className="mb-4 flex justify-center">
-                      <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-blue-50">
-                        <svg className="h-7 w-7 text-blue-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                          <path strokeLinecap="round" strokeLinejoin="round"
-                            d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-                        </svg>
-                      </div>
-                    </div>
-                    <p className="text-base font-semibold text-gray-900">Company Directory</p>
-                    <p className="mt-1.5 text-sm text-gray-500">
-                      Select a state, city and instrument type<br />to browse companies across India.
-                    </p>
-                    <div className="mt-4 space-y-2 text-xs">
-                      <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-1.5 text-gray-500">
-                        Maharashtra / Mumbai / Banks / Bonds
-                      </div>
-                      <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-1.5 text-gray-500">
-                        Gujarat / Ahmedabad / NBFCs / NCD
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              )}
-            </main>
+            </div>
 
             {detailOpen && selectedCompany && (
               <aside className="w-80 shrink-0 overflow-hidden border-l border-gray-200 bg-white xl:w-96">

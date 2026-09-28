@@ -806,7 +806,11 @@ async def health():
     """Liveness for uptime checks - kept off "/" so the root can serve the UI."""
     _failures.set(Counter())
     sources = _source_status(0) + _cra_status()
-    degraded = [s["name"] for s in sources if not s["ok"]]
+    # No LLM key is a supported mode, not a fault - PREMORTEM.md #6: every
+    # LLM-produced field has a rule-based fallback, so this never blanks a
+    # row. Still reported in `sources` (the per-search banner needs it) but
+    # not paged on here, same treatment as the statically-blocked CRA sites.
+    degraded = [s["name"] for s in sources if not s["ok"] and s["name"] != "AI scoring"]
     if degraded:
         # Logged at WARNING so an always-on host's log alerting can fire on it
         # without anything having to poll this endpoint.
