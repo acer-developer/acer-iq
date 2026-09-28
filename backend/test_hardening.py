@@ -643,6 +643,38 @@ def test_archive_links_are_http_only():
     assert main._news_link({"link": "javascript:x", "symbol": "ACME"}).startswith("https://www.nseindia.com/")
 
 
+def test_fit_analysis_says_whether_ai_answered():
+    """A retired free model left every fit analysis rule-based while the UI
+    implied AI. Now every fit carries analysis_source, and an LLM reply is
+    filtered field by field so a malformed one cannot blank anything."""
+    import asyncio
+    from backend.pipeline import fit_analyzer, llm
+    company = {"name": "Acme Finance Limited", "entity_type": "NBFC"}
+    credit = {"agencies": [], "rated_by_count": 0, "data_status": "none_found",
+              "total_instruments": 0}
+    real_chat, real_prov = fit_analyzer.chat, llm._providers
+
+    async def no_answer(prompt, max_tokens=600):
+        return None
+    async def junk(prompt, max_tokens=600):
+        llm.last_answer.update(provider="OpenRouter", model="test/model:free")
+        return '{"fit_score": 77, "key_insights": "not a list", "recommended_action": ""}'
+    llm._providers = lambda: [{"name": "OpenRouter"}]
+    try:
+        fit_analyzer.chat = no_answer
+        r = asyncio.run(fit_analyzer.analyze_fit(company, credit))
+        assert r["analysis_source"].startswith("Rule-based"), r
+        base_action = r["recommended_action"]
+        fit_analyzer.chat = junk
+        r = asyncio.run(fit_analyzer.analyze_fit(company, credit))
+        assert r["analysis_source"] == "AI - test/model:free", r
+        assert r["fit_score"] == 77
+        assert isinstance(r["key_insights"], list)          # junk ignored
+        assert r["recommended_action"] == base_action        # blank ignored
+    finally:
+        fit_analyzer.chat, llm._providers = real_chat, real_prov
+
+
 def test_per_user_pipeline_refuses_an_anonymous_caller():
     """With Supabase configured, leads are per BD. A request with no session
     must get 401 - never the old shared SQLite list, which would mix four

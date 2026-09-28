@@ -5,6 +5,8 @@ class Settings(BaseSettings):
     google_places_api_key: str = ""
     hunter_api_key: str = ""
     openrouter_api_key: str = ""  # primary LLM - free models available
+    # Optional, comma-separated. Empty = pick from OpenRouter's live free list.
+    openrouter_model: str = ""
     # Fallback LLM. Any OpenAI-compatible endpoint works; used when OpenRouter
     # has no key or its free tier is rate-limited.
     tokenrouter_api_key: str = ""

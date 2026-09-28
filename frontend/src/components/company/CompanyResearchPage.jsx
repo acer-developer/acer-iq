@@ -372,6 +372,12 @@ function FitAnalysisCard({ fit, loading }) {
         </div>
       )}
 
+      {fit.analysis_source && (
+        <p className={`text-[10px] ${fit.analysis_source.startsWith("AI") ? "text-emerald-600" : "text-amber-600"}`}>
+          Analysis: {fit.analysis_source}
+        </p>
+      )}
+
       {/* Action */}
       {fit.recommended_action && (
         <div className="rounded-xl bg-blue-600 px-4 py-3 text-center">

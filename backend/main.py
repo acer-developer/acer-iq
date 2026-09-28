@@ -114,6 +114,18 @@ def _llm_configured() -> bool:
     return bool(_providers())
 
 
+def _ai_status() -> str:
+    """"" when AI is working; otherwise why not. Configured is not the same as
+    working: a retired free model left every answer rule-based for days
+    while this said "ok" (found 2026-09-28)."""
+    if not _llm_configured():
+        return "no LLM key configured - rule-based scores only"
+    bad = [s for s in source_health.snapshot("AI (") if s["state"] in ("failing", "down")]
+    if bad:
+        return f"configured, but {bad[0]['message']} - rule-based until it recovers"
+    return ""
+
+
 def _cra_status() -> list[dict]:
     """Per-agency scrape health, so a dark scraper is visible to uptime checks.
 
@@ -155,8 +167,7 @@ def _source_status(total: int) -> list[dict]:
         # point is that a restart must not start 404-ing CSV exports.
         f"Search store ({database.backend_name()})": "",
         "BSE": "circuit breaker open - BSE unreachable or blocking" if _bse_tripped() else "",
-        "AI scoring": "" if _llm_configured()
-                      else "no LLM key configured - rule-based scores only",
+        "AI scoring": _ai_status(),
     }
     for label, n in (_failures.get() or Counter()).items():
         name = _SOURCE_NAMES.get(label, label)

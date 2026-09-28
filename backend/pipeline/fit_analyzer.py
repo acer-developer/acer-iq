@@ -1,3 +1,4 @@
+from backend.pipeline import llm
 from backend.pipeline.llm import chat, parse_json
 
 FIT_PROMPT = """\
@@ -207,9 +208,13 @@ async def analyze_fit(company: dict, credit_data: dict) -> dict:
     """
     # Always compute the data-driven baseline first
     result = _data_driven_analysis(company, credit_data)
+    # Said on screen, so a rule-based answer never passes for an AI one.
+    result["analysis_source"] = ("Rule-based - AI not configured" if not llm._providers()
+                                 else "Rule-based - no AI model answered")
 
     # No verified data → no LLM (it would confidently invent a story)
     if credit_data.get("data_status") == "unverified":
+        result["analysis_source"] = "Rule-based - sources unverified, AI not asked"
         return result
 
     # Try AI enrichment if key is available
@@ -240,6 +245,18 @@ async def analyze_fit(company: dict, credit_data: dict) -> dict:
 
     if parsed and isinstance(parsed.get("fit_score"), (int, float)):
         parsed["fit_label"] = _label(int(parsed["fit_score"]))
-        return parsed
+        # LLM output trust boundary: keep only the fields the UI renders, typed,
+        # and fall back field by field so nothing ever blanks (PREMORTEM 6).
+        out = dict(result)
+        for k in ("fit_score", "fit_label", "opportunity_type", "recommended_action",
+                  "best_instrument_pitch", "urgency"):
+            if isinstance(parsed.get(k), (str, int, float)) and str(parsed[k]).strip():
+                out[k] = parsed[k]
+        for k in ("key_insights", "watch_outs"):
+            v = parsed.get(k)
+            if isinstance(v, list) and v and all(isinstance(x, str) for x in v):
+                out[k] = [x[:300] for x in v[:6]]
+        out["analysis_source"] = f"AI - {llm.last_answer.get('model') or llm.last_answer.get('provider', 'LLM')}"
+        return out
 
     return result
