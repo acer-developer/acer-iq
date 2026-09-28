@@ -97,6 +97,45 @@ create index if not exists idx_cra_actions_first_seen on public.cra_actions (fir
 
 
 -- ---------------------------------------------------------------------------
+-- news_archive: every news item read, kept (backend/pipeline/news_archive.py)
+--
+-- Append-only. `first_seen` is the date ACER-IQ read the item - the read
+-- date every row on screen carries. Classification happens on read, so the
+-- raw text is what is stored.
+-- ---------------------------------------------------------------------------
+create table if not exists public.news_archive (
+    key          text        primary key,
+    source       text        not null,
+    company      text        not null default '',
+    symbol       text        not null default '',
+    date         text        not null default '',   -- YYYY-MM-DD as published
+    subject      text        not null default '',
+    description  text        not null default '',
+    categories   text        not null default '[]', -- JSON list
+    link         text        not null default '',
+    first_seen   timestamptz not null default now()
+);
+
+create index if not exists idx_news_first_seen on public.news_archive (first_seen);
+
+
+-- ---------------------------------------------------------------------------
+-- source_reads: last successful read per source (backend/pipeline/source_health.py)
+--
+-- What lets an empty list say "source unreachable since X" instead of looking
+-- like a quiet day, and survive a restart while saying it (PREMORTEM section 2).
+-- ---------------------------------------------------------------------------
+create table if not exists public.source_reads (
+    source        text primary key,
+    last_attempt  timestamptz,
+    last_success  timestamptz,
+    failing_since timestamptz,
+    last_error    text default '',
+    last_count    integer
+);
+
+
+-- ---------------------------------------------------------------------------
 -- Row level security
 --
 -- Without this, any holder of the publishable key could read every user's
@@ -107,6 +146,8 @@ alter table public.saved_leads enable row level security;
 alter table public.lead_events enable row level security;
 alter table public.searches    enable row level security;
 alter table public.cra_actions enable row level security;
+alter table public.news_archive enable row level security;
+alter table public.source_reads enable row level security;
 
 drop policy if exists "own leads" on public.saved_leads;
 create policy "own leads" on public.saved_leads
@@ -146,6 +187,31 @@ create policy "append cra actions" on public.cra_actions
     for insert
     to anon, authenticated
     with check (true);
+
+
+-- News items are public publications: read + append only, like cra_actions.
+drop policy if exists "read news archive" on public.news_archive;
+create policy "read news archive" on public.news_archive
+    for select to anon, authenticated using (true);
+
+drop policy if exists "append news archive" on public.news_archive;
+create policy "append news archive" on public.news_archive
+    for insert to anon, authenticated with check (true);
+
+-- Source freshness is one row per source, overwritten on every read, so it
+-- needs update as well. It holds no personal data - only when a public site
+-- last answered.
+drop policy if exists "read source reads" on public.source_reads;
+create policy "read source reads" on public.source_reads
+    for select to anon, authenticated using (true);
+
+drop policy if exists "write source reads" on public.source_reads;
+create policy "write source reads" on public.source_reads
+    for insert to anon, authenticated with check (true);
+
+drop policy if exists "update source reads" on public.source_reads;
+create policy "update source reads" on public.source_reads
+    for update to anon, authenticated using (true) with check (true);
 
 
 -- ---------------------------------------------------------------------------

@@ -6,13 +6,17 @@ a company may need credit rating services: expansion, capex, fund
 raising, acquisitions, NCD/bond issuance, rating actions, etc.
 """
 
+import asyncio
 import re
 import time
 from datetime import date, timedelta
 
 import httpx
 
+from backend.pipeline import news_archive, source_health
+
 NSE_ANNOUNCEMENTS = "https://www.nseindia.com/api/corporate-announcements"
+SOURCE = "NSE announcements"   # the name source_health and the UI show
 NSE_WARMUP = "https://www.nseindia.com"
 
 _WARMUP_HEADERS = {
@@ -170,6 +174,7 @@ async def fetch_market_news(days: int = 7) -> dict:
             err_msg = str(e) or "Connection failed"
 
     if items is None:
+        source_health.record(SOURCE, False, error=err_msg or "no answer")
         return {
             "items": [], "status": "blocked", "source": "NSE",
             "message": f"Could not reach NSE after 2 attempts. {err_msg}",
@@ -197,10 +202,17 @@ async def fetch_market_news(days: int = 7) -> dict:
             "subject": desc[:400],
             "categories": categories,
             "attachment": str(it.get("attchmntFile") or ""),
+            "link": str(it.get("attchmntFile") or ""),
             "exchange": "NSE",
+            "source": "NSE",
         })
 
     all_items.sort(key=lambda x: x["date"], reverse=True)
+
+    # Every poll is kept (BUILD_PLAN Phase 1): the archive is the record, this
+    # response is just today's view of it.
+    source_health.record(SOURCE, True, len(items))
+    new = await asyncio.to_thread(news_archive.record, all_items)
 
     status = "ok" if all_items else "empty"
     return {
@@ -211,4 +223,5 @@ async def fetch_market_news(days: int = 7) -> dict:
         "to_date": to_date.isoformat(),
         "total_raw": len(items),
         "total_filtered": len(all_items),
+        "archived_new": new,
     }

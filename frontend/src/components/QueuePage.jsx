@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { apiUrl } from "../lib/api.js";
 import { apiFetch } from "../lib/auth.js";
+import { EmptyState, FreshnessStrip } from "./SourceFreshness.jsx";
 
 // Saves to the signed-in BD's own pipeline (per-user via Supabase; the shared
 // SQLite list only when auth is not configured). The save is idempotent
@@ -159,6 +160,8 @@ export default function QueuePage() {
     }
   }, []);
 
+  const [freshness, setFreshness] = useState({ rows: [], verdict: null });
+
   const fetchQueue = useCallback(async () => {
     setLoading(true);
     setError("");
@@ -168,6 +171,7 @@ export default function QueuePage() {
       const data = await res.json();
       setLeads(data.leads ?? []);
       setCoverage(data.coverage ?? null);
+      setFreshness({ rows: data.freshness ?? [], verdict: data.empty_means ?? null });
       try {
         const savedRes = await apiFetch("/api/leads");
         if (savedRes.ok) {
@@ -221,6 +225,9 @@ export default function QueuePage() {
             <span className="font-semibold">Coverage:</span> {coverage.note}
           </div>
         )}
+        {freshness.rows.length > 0 && (
+          <div className="mt-2"><FreshnessStrip rows={freshness.rows} /></div>
+        )}
 
         {/* Summary metrics */}
         <div className="mt-3 grid grid-cols-4 gap-3">
@@ -261,9 +268,13 @@ export default function QueuePage() {
         </div>
       )}
 
-      {!loading && sorted.length === 0 && (
+      {!loading && !error && sorted.length === 0 && (
         <div className="flex flex-1 items-center justify-center">
-          <p className="text-sm text-gray-500">No leads in the queue.</p>
+          <EmptyState
+            verdict={freshness.verdict}
+            quietTitle="No rating actions in this window"
+            quietText="Every agency feed answered and none named a new issuer - a quiet window, not a broken one."
+          />
         </div>
       )}
 

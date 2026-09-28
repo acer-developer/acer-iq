@@ -531,6 +531,44 @@ def test_health_names_the_search_store_in_use():
     assert any(s["name"].startswith("Search store") for s in h["sources"]), h["sources"]
 
 
+def test_health_pages_on_a_source_silent_for_48_hours():
+    """PREMORTEM section 2/8: a feed that has not answered in 48h must reach
+    the list an uptime check pages on, and say since when - not hide behind
+    a green process-liveness check."""
+    import asyncio
+    from datetime import datetime, timedelta, timezone
+    from backend import main
+    from backend.pipeline import source_health as sh
+    saved, loaded = dict(sh._state), sh._loaded
+    three_days = (datetime.now(timezone.utc) - timedelta(days=3)).isoformat(timespec="seconds")
+    sh._loaded = True
+    sh._state["NSE announcements"] = {
+        "source": "NSE announcements", "last_attempt": three_days,
+        "last_success": None, "failing_since": three_days,
+        "last_error": "HTTP 403", "last_count": None}
+    try:
+        h = asyncio.run(main.health())
+        assert h["status"] == "degraded", h
+        hit = [d for d in h["degraded"] if d.startswith("NSE announcements")]
+        assert hit and "unreachable since" in hit[0], h["degraded"]
+        fresh = {f["source"]: f for f in h["freshness"]}
+        assert fresh["NSE announcements"]["state"] == "down"
+    finally:
+        sh._state.clear(); sh._state.update(saved); sh._loaded = loaded
+
+
+def test_empty_list_says_quiet_or_broken():
+    """An empty list must say which it is (PREMORTEM section 2)."""
+    from backend.pipeline import source_health as sh
+    ok = {"source": "CRA:ACUITE", "state": "ok", "message": "read OK just now"}
+    bad = {"source": "CRA:INDRA", "state": "failing",
+           "message": "unreachable since 28 Sep 10:00 UTC"}
+    assert sh.summarise([ok])["verdict"] == "quiet"
+    v = sh.summarise([ok, bad])
+    assert v["verdict"] == "degraded" and "CRA:INDRA unreachable since" in v["text"], v
+    assert sh.summarise([])["verdict"] == "unknown"
+
+
 def test_per_user_pipeline_refuses_an_anonymous_caller():
     """With Supabase configured, leads are per BD. A request with no session
     must get 401 - never the old shared SQLite list, which would mix four

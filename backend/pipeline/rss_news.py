@@ -5,11 +5,14 @@ Fetches, parses, and classifies news items using the same signal-keyword
 engine as NSE corporate announcements.
 """
 
+import asyncio
 import re
 import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
 
 import httpx
+
+from backend.pipeline import news_archive, source_health
 
 _FEEDS = {
     "Economic Times": {
@@ -137,6 +140,9 @@ def _strip_cdata(text: str | None) -> str:
     return text.strip()
 
 
+FEED_NAMES = list(_FEEDS)
+
+
 def _parse_feed(xml_bytes: bytes, source_name: str) -> list[dict]:
     items = []
     try:
@@ -181,10 +187,18 @@ async def fetch_rss_news() -> dict:
                     parsed = _parse_feed(r.content, name)
                     all_items.extend(parsed)
                     sources_ok.append(name)
+                    source_health.record(name, True, len(parsed))
                 else:
                     sources_fail.append(f"{name} (HTTP {r.status_code})")
+                    source_health.record(name, False, error=f"HTTP {r.status_code}")
             except Exception as e:
                 sources_fail.append(f"{name} ({e})")
+                source_health.record(name, False, error=f"{type(e).__name__}: {e}")
+
+    # Every poll is kept (BUILD_PLAN Phase 1), general items included: what
+    # counts as "major" is decided on read, so the rules can change later
+    # without losing what was read before the change.
+    new = await asyncio.to_thread(news_archive.record, all_items)
 
     all_items.sort(key=lambda x: x["date"], reverse=True)
 
@@ -200,4 +214,5 @@ async def fetch_rss_news() -> dict:
         "sources_fail": sources_fail,
         "total_items": len(all_items),
         "total_signals": len(signal_items),
+        "archived_new": new,
     }

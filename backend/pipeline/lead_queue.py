@@ -154,8 +154,10 @@ async def build_queue(days: int = 30, enrich: int = 15) -> dict:
     # feeds are latest-page snapshots, so without this the `days` window was
     # decoration: days=365 returned the same rows as days=60. History now
     # accumulates from ordinary use, with no scheduled job to forget to run.
-    new_rows = action_history.record(data["actions"])
-    actions = action_history.merge(data["actions"], action_history.since(days))
+    # Off the event loop: both are synchronous calls to Supabase.
+    new_rows = await asyncio.to_thread(action_history.record, data["actions"])
+    archived = await asyncio.to_thread(action_history.since, days)
+    actions = action_history.merge(data["actions"], archived)
     rows = build_rows(actions)
     enriched = await _enrich_coverage(rows, enrich)
     # Enrichment can change scores and block states, so the order is only valid
@@ -181,7 +183,8 @@ async def build_queue(days: int = 30, enrich: int = 15) -> dict:
             "agencies_total": len(sources),
             "data_status": data["data_status"],
             "enriched": enriched,
-            "history": action_history.stats() | {"new_this_build": new_rows},
+            "history": (await asyncio.to_thread(action_history.stats))
+                       | {"new_this_build": new_rows},
             "acer_clients_excluded": sorted(acer_book.client_names()),
             # Said in words so the UI cannot quietly drop it.
             "note": ("Built from "

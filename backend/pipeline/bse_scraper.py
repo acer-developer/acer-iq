@@ -4,6 +4,8 @@ import re
 import time
 import httpx
 
+from backend.pipeline import source_health
+
 log = logging.getLogger("acer-iq.bse")
 
 # BSE retired its per-company debt *search* endpoints (GetDebtScripsSearchData/w
@@ -47,6 +49,7 @@ def _bse_tripped() -> bool:
 
 
 def _bse_record(ok: bool) -> None:
+    source_health.record("BSE", ok)
     if ok:
         _breaker["fails"] = 0
     else:

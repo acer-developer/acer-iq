@@ -35,6 +35,7 @@ from backend.pipeline import brief as pitch_brief
 from backend.pipeline.refinance import find_refinance_candidates
 from backend.pipeline.fundamentals import fetch_for_symbol as fetch_fundamentals
 from backend.pipeline import acer_book
+from backend.pipeline import action_history, news_archive, source_health
 from backend.pipeline.market_news import fetch_market_news
 from backend.pipeline.rss_news import fetch_rss_news
 from backend.pipeline.sector_indices import fetch_sector_indices
@@ -340,7 +341,16 @@ async def get_queue(days: int = 30, enrich: int = 15):
                           "data_status": "unverified",
                           "note": "Queue could not be built - no CRA source answered."}}
     data = await _safe(build_queue(days=days, enrich=enrich), empty, "cra_press")
-    return {**data, "sources": _source_status(1)}
+    # Per-agency last good read, so an empty queue says whether it is a quiet
+    # window or a dead feed (PREMORTEM.md section 2).
+    fresh = source_health.snapshot("CRA:")
+    return {**data, "sources": _source_status(1),
+            "freshness": fresh, "empty_means": source_health.summarise(
+                [f for f in fresh if f["source"] in _CRA_FEEDS])}
+
+
+# The agencies whose feeds build the queue; CARE is lookup-only enrichment.
+_CRA_FEEDS = ("CRA:ACUITE", "CRA:BRICKWORK", "CRA:INDRA")
 
 
 # ── ACER's own book: renewals, and never pitching our own clients ────────────
@@ -852,7 +862,13 @@ async def export_csv(search_id: str):
 
 @app.get("/api/health")
 async def health():
-    """Liveness for uptime checks - kept off "/" so the root can serve the UI."""
+    """Liveness AND per-source freshness for uptime checks - kept off "/" so the
+    root can serve the UI.
+
+    Process liveness alone proved nothing (PREMORTEM.md section 8): a dead
+    scraper left this endpoint green. Now any source with no successful read
+    for 48 hours, and any archive that would not survive a restart, lands in
+    `degraded` - the list an uptime check pages on."""
     _failures.set(Counter())
     sources = _source_status(0) + _cra_status()
     # No LLM key is a supported mode, not a fault - PREMORTEM.md #6: every
@@ -860,6 +876,17 @@ async def health():
     # row. Still reported in `sources` (the per-search banner needs it) but
     # not paged on here, same treatment as the statically-blocked CRA sites.
     degraded = [s["name"] for s in sources if not s["ok"] and s["name"] != "AI scoring"]
+
+    fresh = await asyncio.to_thread(source_health.snapshot)
+    degraded += [f"{f['source']}: {f['message']}" for f in fresh if f["alarm"]]
+
+    archives = {"cra_actions": await asyncio.to_thread(action_history.stats),
+                "news": await asyncio.to_thread(news_archive.stats)}
+    if database.supabase_configured():
+        # Supabase is set up but an archive is still on SQLite: the tables were
+        # not created, and every restart is silently wiping history.
+        degraded += [f"{name} archive not durable (run supabase_schema.sql)"
+                     for name, st in archives.items() if not st.get("durable")]
     if degraded:
         # Logged at WARNING so an always-on host's log alerting can fire on it
         # without anything having to poll this endpoint.
@@ -872,7 +899,40 @@ async def health():
         "ui": "bundled" if _FRONTEND_DIST.exists() else settings.frontend_url,
         "degraded": degraded,
         "sources": sources,
+        "freshness": fresh,
+        "archives": archives,
     }
+
+
+# ── Poll: keep the archives filling when nobody has the app open ─────────────
+
+_last_poll = {"at": 0.0}
+_POLL_EVERY = 600   # seconds; a scheduled pinger cannot make this hammer NSE
+
+
+@app.get("/api/poll")
+async def poll():
+    """Read every feed once and fold it into the archives.
+
+    The archives only grow when something reads the feeds. Without this they
+    grow only while a BD has the tab open, and a quiet week becomes a hole in
+    the history. A scheduled job (.github/workflows/keepalive.yml) calls it;
+    the throttle makes a second call inside ten minutes a cheap no-op."""
+    import time as _time
+    if _time.time() - _last_poll["at"] < _POLL_EVERY:
+        return {"polled": False, "reason": "polled less than 10 minutes ago",
+                "freshness": source_health.snapshot()}
+    _last_poll["at"] = _time.time()
+    from backend.pipeline import cra_press
+    nse, rss, cra = await asyncio.gather(
+        _safe(fetch_market_news(7), {}, "nse_news"),
+        _safe(fetch_rss_news(), {}, "rss_news"),
+        _safe(cra_press.fetch_recent_actions(days=30), {"actions": []}, "cra_press"))
+    new_actions = await asyncio.to_thread(action_history.record, cra.get("actions", []))
+    return {"polled": True,
+            "news_new": (nse.get("archived_new") or 0) + (rss.get("archived_new") or 0),
+            "cra_actions_new": new_actions,
+            "freshness": source_health.snapshot()}
 
 
 _FRONTEND_DIST = Path(__file__).parent.parent / "frontend" / "dist"

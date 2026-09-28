@@ -54,6 +54,7 @@ from datetime import datetime, timedelta
 import httpx
 from bs4 import BeautifulSoup
 
+from backend.pipeline import source_health
 from backend.pipeline.bse_scraper import _norm
 from backend.pipeline.nse_ratings import _MONTHS, _date_key
 
@@ -99,6 +100,9 @@ def _tripped(source: str) -> bool:
 
 
 def _record(source: str, ok: bool) -> None:
+    # Called on every real read, so it is also where "last successful read"
+    # is kept - the breaker forgets in 10 minutes, a BD needs to know for days.
+    source_health.record(f"CRA:{source}", ok)
     b = _breaker[source]
     if ok:
         b["fails"] = 0

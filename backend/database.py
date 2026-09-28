@@ -110,13 +110,17 @@ def remote(label: str, fn):
 _PAGE = 1000
 
 
-def select_all(client, table: str, cols: str, order: tuple[str, ...]) -> list[dict]:
-    """Every row of `table`, paged. `order` must be unique (the primary key) or
-    paging can skip or repeat rows. Raises - wrap it in remote()."""
+def select_all(client, table: str, cols: str, order: tuple[str, ...],
+               where=None) -> list[dict]:
+    """Every row of `table` (optionally narrowed by `where(query)`), paged.
+    `order` must be unique (the primary key) or paging can skip or repeat rows.
+    Raises - wrap it in remote()."""
     out: list[dict] = []
     start = 0
     while True:
         q = client.table(table).select(cols)
+        if where is not None:
+            q = where(q)
         for c in order:
             q = q.order(c)
         page = q.range(start, start + _PAGE - 1).execute().data or []
