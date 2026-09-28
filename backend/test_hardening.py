@@ -538,17 +538,42 @@ def test_history_dedupes_a_refetched_page():
     key, one company's action multiplies into dozens of rows."""
     import tempfile
     from pathlib import Path
+    from backend import database
     from backend.pipeline import action_history as ah
-    real = ah.DB_PATH
+    real, real_client = ah.DB_PATH, database.get_client
     tmp = tempfile.mkdtemp()
     ah.DB_PATH = Path(tmp) / "t.sqlite"
+    database.get_client = lambda: None  # never write to a configured Supabase
     try:
         batch = [{"agency": "ACUITE", "company_name": "Acme Ltd", "rating": "A",
                   "action": "Reaffirmed", "date": "01-09-2026"}]
         assert ah.record(batch) == 1
         assert ah.record(batch) == 0
     finally:
-        ah.DB_PATH = real
+        ah.DB_PATH, database.get_client = real, real_client
+
+
+def test_history_falls_back_to_sqlite_and_says_it_is_not_durable():
+    """Until supabase_schema.sql runs, the cra_actions table does not exist.
+    A write must still land somewhere, and stats() must not claim a durable
+    archive it does not have - pipeline.sqlite dies on a Render restart."""
+    import tempfile
+    from pathlib import Path
+    from backend import database
+    from backend.pipeline import action_history as ah
+    real, real_client = ah.DB_PATH, database.get_client
+    ah.DB_PATH = Path(tempfile.mkdtemp()) / "t.sqlite"
+    database.get_client = lambda: ah._FakeTable(fail=True)
+    try:
+        today = __import__("datetime").datetime.now().strftime("%d-%m-%Y")
+        assert ah.record([{"agency": "CARE", "company_name": "Acme Ltd",
+                           "rating": "CARE A", "action": "Assigned",
+                           "date": today}]) == 1
+        assert [a["company_name"] for a in ah.since(30)] == ["Acme Ltd"]
+        st = ah.stats()
+        assert st["store"] == "sqlite" and st["durable"] is False, st
+    finally:
+        ah.DB_PATH, database.get_client = real, real_client
 
 
 def test_history_merge_prefers_the_live_row():

@@ -15,6 +15,14 @@ Dedup is on the natural key (agency, company, rating, action, date) rather than
 an id, because these feeds carry no stable identifier. Re-fetching the same page
 every 15 minutes must not multiply rows.
 
+WHERE IT LIVES: Supabase `cra_actions` when configured (supabase_schema.sql),
+SQLite otherwise - the same fall-through as backend/database.py, reusing its
+client. pipeline.sqlite is gitignored and Render declares no disk, so on its own
+it is wiped on every restart (PREMORTEM.md section 1). SQLite is the local-dev
+path and the safety net for a Supabase outage, not the archive of record.
+Reads union both stores, so rows written to SQLite during an outage still show.
+`stats()["durable"]` says which one is actually holding the history.
+
 Self-check (temp DB, no network):  python -m backend.pipeline.action_history
 """
 from __future__ import annotations
@@ -24,6 +32,8 @@ import sqlite3
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+
+from backend import database
 
 log = logging.getLogger("acer-iq.action_history")
 
@@ -44,6 +54,12 @@ CREATE TABLE IF NOT EXISTS cra_actions (
 
 CREATE INDEX IF NOT EXISTS idx_actions_date ON cra_actions(date);
 """
+
+_TABLE = "cra_actions"
+_KEY = ("agency", "company_name", "rating", "action", "date")
+_COLS = _KEY + ("isin", "source_url")
+# PostgREST caps a response at 1000 rows by default; read in pages below that.
+_PAGE = 1000
 
 
 @contextmanager
@@ -66,26 +82,74 @@ def record(actions: list[dict]) -> int:
 
     Never raises: this is a side effect of building the queue, and a write
     failure must not take the queue down with it. It is logged instead."""
-    if not actions:
-        return 0
     now = datetime.now(timezone.utc).isoformat(timespec="seconds")
-    rows = [(a.get("agency", ""), a.get("company_name", ""), a.get("rating", ""),
-             a.get("action", ""), a.get("date", ""), a.get("isin", ""),
-             a.get("source_url", ""), now)
-            for a in actions if a.get("agency") and a.get("company_name")]
+    rows = [{c: a.get(c, "") or "" for c in _COLS} | {"first_seen": now}
+            for a in (actions or []) if a.get("agency") and a.get("company_name")]
+    if not rows:
+        return 0
+
+    client = database.get_client()
+    if client:
+        try:
+            # ON CONFLICT DO NOTHING: only genuinely new rows come back.
+            res = client.table(_TABLE).upsert(
+                rows, on_conflict=",".join(_KEY), ignore_duplicates=True).execute()
+            return len(res.data or [])
+        except Exception as e:
+            # Most likely supabase_schema.sql has not been run yet. SQLite
+            # keeps the row for this process's lifetime rather than losing it.
+            log.error("Supabase action_history.record failed, falling back to "
+                      "SQLite (not durable in production): %s: %s",
+                      type(e).__name__, e)
+
     try:
         with _connect() as con:
             before = con.execute("SELECT COUNT(*) FROM cra_actions").fetchone()[0]
             con.executemany(
                 "INSERT OR IGNORE INTO cra_actions (agency, company_name, rating,"
                 " action, date, isin, source_url, first_seen)"
-                " VALUES (?,?,?,?,?,?,?,?)", rows)
+                " VALUES (:agency,:company_name,:rating,:action,:date,:isin,"
+                ":source_url,:first_seen)", rows)
             after = con.execute("SELECT COUNT(*) FROM cra_actions").fetchone()[0]
         return after - before
     except Exception as e:
         log.error("action_history.record failed, history will have a gap: %s: %s",
                   type(e).__name__, e)
         return 0
+
+
+def _supabase_rows() -> list[dict]:
+    """Every archived row from Supabase, or [] when it is not configured or
+    not reachable (logged)."""
+    client = database.get_client()
+    if not client:
+        return []
+    out: list[dict] = []
+    try:
+        start = 0
+        while True:
+            q = client.table(_TABLE).select(",".join(_COLS))
+            for c in _KEY:  # the primary key: stable order for paging
+                q = q.order(c)
+            page = q.range(start, start + _PAGE - 1).execute().data or []
+            out.extend(page)
+            if len(page) < _PAGE:
+                return out
+            start += _PAGE
+    except Exception as e:
+        log.error("Supabase action_history read failed, serving SQLite only: "
+                  "%s: %s", type(e).__name__, e)
+        return []
+
+
+def _sqlite_rows() -> list[dict]:
+    try:
+        with _connect() as con:
+            return [{c: r[c] for c in _COLS}
+                    for r in con.execute("SELECT * FROM cra_actions").fetchall()]
+    except Exception as e:
+        log.error("action_history SQLite read failed: %s: %s", type(e).__name__, e)
+        return []
 
 
 def _parse(d: str):
@@ -103,34 +167,41 @@ def since(days: int) -> list[dict]:
     as text. Converting the column would silently reinterpret the rows already
     written by the scrapers, so the cost is paid here instead."""
     cutoff = datetime.now() - timedelta(days=days)
-    try:
-        with _connect() as con:
-            rows = con.execute("SELECT * FROM cra_actions").fetchall()
-    except Exception as e:
-        log.error("action_history.since failed: %s: %s", type(e).__name__, e)
-        return []
-
     out = []
-    for r in rows:
+    for r in merge(_supabase_rows(), _sqlite_rows()):
         d = _parse(r["date"])
         # An undated action is kept, matching cra_press._within_days: dropping it
         # silently would be worse than showing it.
         if d is None or d >= cutoff:
-            out.append({k: r[k] for k in r.keys() if k != "first_seen"})
+            out.append(r)
     return out
 
 
 def stats() -> dict:
     """How much history actually exists, so the UI can say so rather than imply
-    a depth the archive does not have yet."""
+    a depth the archive does not have yet - and where it lives, because a
+    SQLite-only archive in production is gone on the next restart."""
+    client = database.get_client()
+    if client:
+        try:
+            res = (client.table(_TABLE).select("first_seen", count="exact")
+                   .order("first_seen").limit(1).execute())
+            return {"actions": res.count or 0,
+                    "collecting_since": (res.data[0]["first_seen"]
+                                         if res.data else None),
+                    "store": "supabase", "durable": True}
+        except Exception as e:
+            log.error("Supabase action_history.stats failed, reporting SQLite: "
+                      "%s: %s", type(e).__name__, e)
+    local = {"store": "sqlite", "durable": False}
     try:
         with _connect() as con:
             total = con.execute("SELECT COUNT(*) FROM cra_actions").fetchone()[0]
             oldest = con.execute(
                 "SELECT MIN(first_seen) FROM cra_actions").fetchone()[0]
     except Exception:
-        return {"actions": 0, "collecting_since": None}
-    return {"actions": total, "collecting_since": oldest}
+        return {"actions": 0, "collecting_since": None} | local
+    return {"actions": total, "collecting_since": oldest} | local
 
 
 def merge(live: list[dict], archived: list[dict]) -> list[dict]:
@@ -145,13 +216,51 @@ def merge(live: list[dict], archived: list[dict]) -> list[dict]:
     return list(merged.values())
 
 
+class _FakeTable:
+    """Stands in for a Supabase client in the self-check only. `rows` is what a
+    read returns; `fail` makes every call raise, as a missing table does."""
+
+    def __init__(self, rows=None, fail=False):
+        self.rows, self.fail, self.count = rows or [], fail, len(rows or [])
+        self.data = None
+
+    def table(self, _name):
+        if self.fail:
+            raise RuntimeError('relation "public.cra_actions" does not exist')
+        return self
+
+    def upsert(self, rows, **_kw):
+        self.data = rows
+        return self
+
+    def select(self, *_a, **_kw):
+        self.data = self.rows
+        return self
+
+    def order(self, *_a, **_kw):
+        return self
+
+    def range(self, *_a):
+        return self
+
+    def limit(self, _n):
+        self.data = self.rows[:1]
+        return self
+
+    def execute(self):
+        return self
+
+
 def _demo() -> None:
     import tempfile
     global DB_PATH
-    real = DB_PATH
+    real, real_client = DB_PATH, database.get_client
+    # Never let the self-check write to a real, configured Supabase.
+    database.get_client = lambda: None
     with tempfile.TemporaryDirectory() as tmp:
         DB_PATH = Path(tmp) / "t.sqlite"
         try:
+            assert stats()["durable"] is False
             today = datetime.now().strftime("%d-%m-%Y")
             old = (datetime.now() - timedelta(days=200)).strftime("%d-%m-%Y")
 
@@ -190,9 +299,37 @@ def _demo() -> None:
             assert len(merged) == 3, merged
 
             assert record([]) == 0
+
+            # Supabase configured but the table missing (schema not yet run):
+            # writes and reads fall through to SQLite, and stats says so.
+            database.get_client = lambda: _FakeTable(fail=True)
+            assert record([{"agency": "CARE", "company_name": "Delta Ltd",
+                            "rating": "CARE A", "action": "Assigned",
+                            "date": today}]) == 1
+            assert any(a["company_name"] == "Delta Ltd" for a in since(30))
+            st = stats()
+            assert st["store"] == "sqlite" and st["durable"] is False, st
+
+            # Supabase working: its rows are unioned with SQLite's, deduped on
+            # the natural key, and stats reports the durable store.
+            remote = [{"agency": "ACUITE", "company_name": "Acme Ltd",
+                       "rating": "ACUITE A", "action": "Reaffirmed", "date": today,
+                       "isin": "", "source_url": "", "first_seen": "2026-09-01"},
+                      {"agency": "BWR", "company_name": "Eta Ltd",
+                       "rating": "BWR BBB", "action": "Assigned", "date": today,
+                       "isin": "", "source_url": "", "first_seen": "2026-09-02"}]
+            database.get_client = lambda: _FakeTable(remote)
+            names = [a["company_name"] for a in since(30)]
+            assert names.count("Acme Ltd") == 1 and "Eta Ltd" in names, names
+            assert "Delta Ltd" in names, "SQLite rows written in an outage vanished"
+            st = stats()
+            assert st == {"actions": 2, "collecting_since": "2026-09-01",
+                          "store": "supabase", "durable": True}, st
+            assert record(remote) == 2  # count = rows the upsert returned
+
             print("action_history self-check: ok")
         finally:
-            DB_PATH = real
+            DB_PATH, database.get_client = real, real_client
 
 
 if __name__ == "__main__":

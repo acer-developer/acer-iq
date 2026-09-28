@@ -69,6 +69,30 @@ create index if not exists idx_events_user    on public.lead_events (user_id, at
 
 
 -- ---------------------------------------------------------------------------
+-- cra_actions: the archive of CRA rating actions (backend/pipeline/action_history.py)
+--
+-- The feeds are latest-page snapshots, so this table is the only place the
+-- history exists. Until it is created the backend keeps it in pipeline.sqlite,
+-- which Render wipes on every restart (PREMORTEM.md section 1).
+-- Append-only: the natural key dedupes re-fetches; nothing updates or deletes.
+-- `date` stays text (DD-MM-YYYY), the format every scraper writes.
+-- ---------------------------------------------------------------------------
+create table if not exists public.cra_actions (
+    agency       text        not null,
+    company_name text        not null,
+    rating       text        not null default '',
+    action       text        not null default '',
+    date         text        not null default '',
+    isin         text        not null default '',
+    source_url   text        not null default '',
+    first_seen   timestamptz not null default now(),
+    primary key (agency, company_name, rating, action, date)
+);
+
+create index if not exists idx_cra_actions_first_seen on public.cra_actions (first_seen);
+
+
+-- ---------------------------------------------------------------------------
 -- Row level security
 --
 -- Without this, any holder of the publishable key could read every user's
@@ -78,6 +102,7 @@ create index if not exists idx_events_user    on public.lead_events (user_id, at
 alter table public.saved_leads enable row level security;
 alter table public.lead_events enable row level security;
 alter table public.searches    enable row level security;
+alter table public.cra_actions enable row level security;
 
 drop policy if exists "own leads" on public.saved_leads;
 create policy "own leads" on public.saved_leads
@@ -98,6 +123,24 @@ create policy "signed in searches" on public.searches
     for all
     to authenticated
     using (true)
+    with check (true);
+
+
+-- CRA actions are public press releases, and the backend writes them with the
+-- publishable key, so anon may read and insert. There is deliberately no
+-- update or delete policy: the archive is append-only even to its own writer.
+-- Caveat: anyone holding the publishable key can insert rows. Moving the
+-- backend to the service-role key (server-side only) would close that.
+drop policy if exists "read cra actions" on public.cra_actions;
+create policy "read cra actions" on public.cra_actions
+    for select
+    to anon, authenticated
+    using (true);
+
+drop policy if exists "append cra actions" on public.cra_actions;
+create policy "append cra actions" on public.cra_actions
+    for insert
+    to anon, authenticated
     with check (true);
 
 

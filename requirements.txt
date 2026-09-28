@@ -9,4 +9,12 @@ pydantic-settings==2.14.1
 python-multipart==0.0.20
 # optional: search + pipeline persistence. The app falls back to SQLite
 # automatically when it is absent or misconfigured (backend/database.py).
+# Its sub-packages are unpinned upstream: a fresh install pulls supabase-auth
+# 2.31, which `import supabase` 2.22 cannot load, so the client silently fell
+# back to SQLite. Pin the whole release train together.
 supabase==2.22.0
+supabase-auth==2.22.0
+postgrest==2.22.0
+storage3==2.22.0
+realtime==2.22.0
+supabase-functions==2.22.0
