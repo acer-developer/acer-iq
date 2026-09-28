@@ -200,6 +200,10 @@ async def fetch_market_news(days: int = 7) -> dict:
             "symbol": symbol,
             "date": _format_date(str(it.get("an_dt") or "")),
             "subject": desc[:400],
+            # The filing's own summary: NSE subjects are one-word labels
+            # ("Acquisition", "Credit Rating"), so this is what the major-only
+            # classifier actually reads.
+            "description": attachment_text[:600],
             "categories": categories,
             "attachment": str(it.get("attchmntFile") or ""),
             "link": str(it.get("attchmntFile") or ""),

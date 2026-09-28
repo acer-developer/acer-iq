@@ -581,53 +581,82 @@ async def get_sectors():
     return await fetch_sector_indices()
 
 
-# ── Market News ──────────────────────────────────────────────────────────────
+# ── Market News (Tab 3: news, kept) ─────────────────────────────────────────
+# Served from the archive, not the live call (BUILD_PLAN Phase 2). A live poll
+# still runs when the archive is more than ten minutes behind, and folds into
+# the archive - so the page shows history, and a dead feed shows as a dead
+# feed rather than an emptier-looking day.
+
+_NEWS_REFRESH_EVERY = 600
+_news_polled = {"at": 0.0}
+_NEWS_SOURCES = ("NSE announcements",)   # plus every RSS feed, added below
+
+
+async def _refresh_news(force: bool = False) -> bool:
+    import time as _time
+    age = _time.time() - _news_polled["at"]
+    # Even a forced refresh waits a minute: the Refresh button must not be a
+    # way to hammer NSE.
+    if age < (60 if force else _NEWS_REFRESH_EVERY):
+        return False
+    _news_polled["at"] = _time.time()
+    await asyncio.gather(_safe(fetch_market_news(7), {}, "nse_news"),
+                         _safe(fetch_rss_news(), {}, "rss_news"))
+    return True
+
+
+def _news_link(it: dict) -> str:
+    if it.get("link"):
+        return it["link"]
+    if it.get("symbol"):
+        return f"https://www.nseindia.com/get-quotes/equity?symbol={it['symbol']}"
+    return ""
+
 
 @app.get("/api/news")
-async def get_market_news(days: int = 7, source: str = "all"):
-    if days < 1 or days > 30:
-        raise HTTPException(status_code=400, detail="days must be between 1 and 30")
+async def get_market_news(days: int = 7, source: str = "all", major: bool = True,
+                          refresh: bool = False):
+    """Archived news for the window, classified. `major=true` (the default)
+    keeps only items with a credit consequence (news_classify.py)."""
+    if days < 1 or days > 365:
+        raise HTTPException(status_code=400, detail="days must be between 1 and 365")
+    from backend.pipeline import news_classify
+    from backend.pipeline.rss_news import FEED_NAMES
 
-    if source == "nse":
-        return await fetch_market_news(days)
-    if source == "rss":
-        return await fetch_rss_news()
+    await _refresh_news(force=refresh)
+    rows = await asyncio.to_thread(news_archive.since, days)
 
-    import asyncio
-    nse_task = asyncio.create_task(fetch_market_news(days))
-    rss_task = asyncio.create_task(fetch_rss_news())
-    nse_data, rss_data = await asyncio.gather(nse_task, rss_task)
+    items = []
+    for r in rows:
+        if source not in ("all", "") and r["source"] != source:
+            continue
+        c = news_classify.classify(r)
+        if major and not c["major"]:
+            continue
+        items.append({
+            "company": r["company"], "symbol": r["symbol"],
+            "subject": r["subject"], "description": r["description"],
+            "source": r["source"], "categories": r["categories"],
+            "published": r["date"], "date": r["date"] or r["first_seen"][:10],
+            # The read date: when ACER-IQ first saw it (BUILD_PLAN invariant 2).
+            "read_at": r["first_seen"],
+            "link": _news_link(r),
+            **c,
+        })
 
-    nse_items = nse_data.get("items", [])
-    for it in nse_items:
-        it.setdefault("source", "NSE")
-        it.setdefault("link", "")
-        it.setdefault("description", "")
-
-    rss_all = rss_data.get("all_items", [])
-
-    combined = nse_items + rss_all
-    combined.sort(key=lambda x: x.get("date", ""), reverse=True)
-
-    sources_summary = ["NSE"]
-    if nse_data.get("status") == "blocked":
-        sources_summary[0] = "NSE (unreachable)"
-    sources_summary.extend(rss_data.get("sources_ok", []))
-    sources_summary.extend(
-        f"{s} (failed)" for s in rss_data.get("sources_fail", [])
-    )
-
+    feeds = list(_NEWS_SOURCES) + list(FEED_NAMES)
+    fresh = [source_health.status(f) for f in feeds]
     return {
-        "items": combined[:300],
-        "status": "ok" if combined else "empty",
-        "sources": sources_summary,
-        "nse_raw": nse_data.get("total_raw", 0),
-        "nse_signals": nse_data.get("total_filtered", 0),
-        "rss_total": rss_data.get("total_items", 0),
-        "rss_signals": rss_data.get("total_signals", 0),
-        "from_date": nse_data.get("from_date", ""),
-        "to_date": nse_data.get("to_date", ""),
-        "total_items": len(combined),
+        "items": items[:500],
+        "total_items": len(items),
+        "truncated": len(items) > 500,
+        "window_days": days,
+        "major_only": major,
+        "freshness": fresh,
+        "empty_means": source_health.summarise(fresh),
+        "archive": await asyncio.to_thread(news_archive.stats),
+        "sources": sorted({r["source"] for r in rows}),
+        "status": "ok" if items else "empty",
     }
 
 
@@ -924,6 +953,7 @@ async def poll():
                 "freshness": source_health.snapshot()}
     _last_poll["at"] = _time.time()
     from backend.pipeline import cra_press
+    _news_polled["at"] = _time.time()
     nse, rss, cra = await asyncio.gather(
         _safe(fetch_market_news(7), {}, "nse_news"),
         _safe(fetch_rss_news(), {}, "rss_news"),

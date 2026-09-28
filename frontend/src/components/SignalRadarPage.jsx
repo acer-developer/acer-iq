@@ -217,7 +217,7 @@ export default function SignalRadarPage() {
     setError("");
     try {
       const [newsRes, sectorsRes] = await Promise.all([
-        fetch(apiUrl(`/api/news?days=7`)),
+        fetch(apiUrl(`/api/news?days=7&major=false`)),
         fetch(apiUrl(`/api/sectors`)),
       ]);
       if (!newsRes.ok) throw new Error(`News: HTTP ${newsRes.status}`);

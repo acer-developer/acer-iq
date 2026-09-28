@@ -569,6 +569,39 @@ def test_empty_list_says_quiet_or_broken():
     assert sh.summarise([])["verdict"] == "unknown"
 
 
+def test_news_rows_carry_source_read_date_and_reason():
+    """BUILD_PLAN invariants 2-4 on Tab 3: served from the archive, major
+    only by default, and every row has a link, a read date and a why."""
+    import asyncio, tempfile, time
+    from pathlib import Path
+    from backend import database, main
+    from backend.pipeline import news_archive as na
+    real, real_client = na.DB_PATH, database.get_client
+    na.DB_PATH = Path(tempfile.mkdtemp()) / "t.sqlite"
+    database.get_client = lambda: None
+    main._news_polled["at"] = time.time()   # no live poll in the test
+    try:
+        from datetime import date
+        today = date.today().isoformat()
+        na.record([
+            {"source": "Economic Times", "subject": "Acme Finance raises Rs 900 cr via NCDs",
+             "link": "https://et.example/1", "date": today},
+            {"source": "LiveMint", "subject": "Top 5 stocks to buy tomorrow",
+             "link": "https://lm.example/2", "date": today},
+        ])
+        major = asyncio.run(main.get_market_news(days=7, major=True))
+        assert [i["subject"] for i in major["items"]] == ["Acme Finance raises Rs 900 cr via NCDs"]
+        row = major["items"][0]
+        assert row["link"] and row["read_at"] and row["why"], row
+        assert row["kind"] == "debt_raise", row
+        everything = asyncio.run(main.get_market_news(days=7, major=False))
+        assert everything["total_items"] == 2
+        assert "empty_means" in major and "freshness" in major
+    finally:
+        na.DB_PATH, database.get_client = real, real_client
+        main._news_polled["at"] = 0.0
+
+
 def test_per_user_pipeline_refuses_an_anonymous_caller():
     """With Supabase configured, leads are per BD. A request with no session
     must get 401 - never the old shared SQLite list, which would mix four
