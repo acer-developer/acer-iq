@@ -112,7 +112,7 @@ def _migrate(con: sqlite3.Connection) -> None:
     backfill `norm` for rows already in it. Without the backfill every old row
     would be invisible to the de-duplication lookup and duplicate on next save."""
     cols = {r[1] for r in con.execute("PRAGMA table_info(saved_leads)")}
-    for col in ("cin", "norm"):
+    for col in ("cin", "norm", "owner"):
         if col not in cols:
             con.execute(f"ALTER TABLE saved_leads ADD COLUMN {col} TEXT")
     for name, in con.execute(
@@ -183,10 +183,10 @@ def _local_save_lead(lead: dict) -> dict:
         now = _now()
         flags = lead.get("flags") or {}
         con.execute(
-            "INSERT INTO saved_leads (company_name, cin, norm, stage, winnability,"
+            "INSERT INTO saved_leads (company_name, cin, norm, owner, stage, winnability,"
             " flags, agencies, notes, saved_at, updated_at)"
-            " VALUES (?,?,?,?,?,?,?,?,?,?)",
-            (name, cin or None, norm_name(name), "Identified",
+            " VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+            (name, cin or None, norm_name(name), (lead.get("owner") or "")[:40], "Identified",
              lead.get("winnability"), json.dumps(flags),
              json.dumps(lead.get("agencies_seen") or []), "", now, now))
         _event(con, name, "saved", "added from queue",
@@ -339,8 +339,12 @@ def _match(rows: list[dict], name: str, cin: str = ""):
     return None, ""
 
 
-def _remote_decode(r: dict) -> dict:
+def _remote_decode(r: dict, me: str = "") -> dict:
     d = {k: v for k, v in r.items() if k != "user_id"}
+    # Whether the signed-in BD owns this row: RLS lets them change only their
+    # own, so the UI shows another BD's lead read-only instead of failing.
+    d["mine"] = (r.get("user_id") == me) if me else True
+    d.setdefault("owner", "")
     d["flags"] = d.get("flags") or {}
     d["agencies"] = d.get("agencies") or []
     d.setdefault("cin", None)
@@ -376,8 +380,11 @@ def _remote_save(c, lead: dict) -> dict:
            "winnability": lead.get("winnability"), "flags": flags,
            "agencies": lead.get("agencies_seen") or [], "notes": "",
            "saved_at": now, "updated_at": now}
+    # Optional columns that arrive with a schema update; a database that has
+    # not had it yet still takes the save without them.
+    optional = {k: v for k, v in (("cin", cin), ("owner", (lead.get("owner") or "")[:40])) if v}
     try:
-        c.table("saved_leads").insert(row | ({"cin": cin} if cin else {})).execute()
+        c.table("saved_leads").insert(row | optional).execute()
     except Exception as e:
         text = str(e)
         if "23505" in text or "duplicate key" in text:
@@ -388,7 +395,7 @@ def _remote_save(c, lead: dict) -> dict:
                 return _remote_decode(existing) | {"already_saved": True,
                                                    "matched_on": matched_on}
             raise
-        if cin and "cin" in text:
+        if optional and any(k in text for k in optional):
             c.table("saved_leads").insert(row).execute()
         else:
             raise
@@ -467,8 +474,47 @@ def remove_lead(company_name: str, token: str | None = None) -> bool:
 
 def list_leads(stage: str | None = None, token: str | None = None) -> list[dict]:
     return _dispatch("list", token,
-                     lambda c: [_remote_decode(r) for r in _remote_rows(c, stage)],
+                     lambda c: [_remote_decode(r, _jwt_sub(token or "")) for r in _remote_rows(c, stage)],
                      lambda: _local_list_leads(stage))
+
+
+def _jwt_sub(token: str) -> str:
+    """The user id in a Supabase JWT, read WITHOUT verifying it - used only to
+    mark which rows are the caller's. Every read and write is still checked by
+    PostgREST against the verified token."""
+    import base64
+    try:
+        part = token.split(".")[1]
+        part += "=" * (-len(part) % 4)
+        return json.loads(base64.urlsafe_b64decode(part)).get("sub", "")
+    except Exception:
+        return ""
+
+
+def list_all_leads(token: str | None = None, owner: str = "") -> list[dict]:
+    """Every BD's saved leads - the Admin view - optionally one owner's.
+
+    Needs a valid session (checked by a real query as that user) and the
+    server-side service key, which bypasses RLS to read across BDs.
+    ponytail: any signed-in BD can pick the Admin profile; the profile is a
+    view, not a permission. Upgrade path: an `admins` table checked here."""
+    def narrow(rows):
+        return [r for r in rows if not owner or (r.get("owner") or "") == owner]
+    if not per_user():
+        return narrow(_local_list_leads())
+    c = _client(token)
+    try:
+        _call("auth check", lambda: c.table("saved_leads").select("company_name").limit(1).execute())
+    finally:
+        c.session.close()
+    ok, rows = database.remote("pipeline all leads", lambda sc: database.select_all(
+        sc, "saved_leads", "*", ("user_id", "company_name")))
+    if not ok:
+        raise StoreUnavailable("team pipeline needs SUPABASE_SERVICE_KEY on the server")
+    me = _jwt_sub(token or "")
+    out = [_remote_decode(r, me) for r in rows or []]
+    out.sort(key=lambda r: r.get("updated_at") or "", reverse=True)
+    return narrow(out)
 
 
 def saved_names(token: str | None = None) -> set[str]:

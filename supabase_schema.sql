@@ -48,6 +48,10 @@ create table if not exists public.saved_leads (
 -- under two spellings still collapses to one row when a source gave a CIN.
 alter table public.saved_leads add column if not exists cin text;
 
+-- Added 2026-09-29: which BD profile the lead belongs to (avinash, hema,
+-- akash, udit - backend/data/bd_roster.json). Admin sees every owner.
+alter table public.saved_leads add column if not exists owner text default '';
+
 
 -- ---------------------------------------------------------------------------
 -- lead_events: the outcome log
@@ -136,6 +140,25 @@ create table if not exists public.source_reads (
 
 
 -- ---------------------------------------------------------------------------
+-- bd_lists: the frozen monthly BD list (backend/pipeline/bd_list.py)
+--
+-- One row per (month, version). Generated once, served from here all month,
+-- so "why was I given this name" is answerable months later. A regeneration
+-- adds a version; nothing is overwritten. Written only by the backend's
+-- service key; readable by signed-in users.
+-- ---------------------------------------------------------------------------
+create table if not exists public.bd_lists (
+    month        text        not null,     -- YYYY-MM
+    version      integer     not null,
+    generated_at timestamptz not null default now(),
+    inputs       text        not null,     -- JSON: health of every input
+    rows         text        not null,     -- JSON: ranked, assigned names
+    outcomes     text,                     -- JSON: month-end result per name
+    primary key (month, version)
+);
+
+
+-- ---------------------------------------------------------------------------
 -- Row level security
 --
 -- Without this, any holder of the publishable key could read every user's
@@ -148,6 +171,7 @@ alter table public.searches    enable row level security;
 alter table public.cra_actions enable row level security;
 alter table public.news_archive enable row level security;
 alter table public.source_reads enable row level security;
+alter table public.bd_lists     enable row level security;
 
 drop policy if exists "own leads" on public.saved_leads;
 create policy "own leads" on public.saved_leads
@@ -204,6 +228,10 @@ drop policy if exists "read source reads" on public.source_reads;
 create policy "read source reads" on public.source_reads
     for select to anon, authenticated using (true);
 drop policy if exists "write source reads" on public.source_reads;
+
+drop policy if exists "read bd lists" on public.bd_lists;
+create policy "read bd lists" on public.bd_lists
+    for select to authenticated using (true);
 drop policy if exists "update source reads" on public.source_reads;
 
 

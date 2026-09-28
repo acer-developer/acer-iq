@@ -461,6 +461,8 @@ class SaveLeadRequest(BaseModel):
     winnability: int | None = None
     flags: dict | None = None
     agencies_seen: list[str] | None = None
+    # BD profile the lead belongs to (bd_roster.json id); "" for Admin.
+    owner: str | None = None
 
 
 class StageRequest(BaseModel):
@@ -469,9 +471,20 @@ class StageRequest(BaseModel):
 
 
 @app.get("/api/leads")
-async def get_saved_leads(stage: str | None = None,
-                          authorization: str | None = Header(None)):
+async def get_saved_leads(stage: str | None = None, scope: str = "mine",
+                          owner: str = "", authorization: str | None = Header(None)):
+    """`scope=all` is the team view (Admin profile, or one BD's leads with
+    `owner`); `scope=mine` is the signed-in user's own rows."""
     tok = _bearer(authorization)
+    if scope == "all":
+        leads = await _pipeline(lambda: pipeline_store.list_all_leads(tok, owner))
+        if stage:
+            leads = [l for l in leads if l["stage"] == stage]
+        counts = {s: 0 for s in pipeline_store.STAGES}
+        for l in leads:
+            counts[l["stage"]] = counts.get(l["stage"], 0) + 1
+        return {"leads": leads, "funnel": counts, "stages": pipeline_store.STAGES,
+                "per_user": pipeline_store.per_user(), "scope": "all"}
     leads = await _pipeline(lambda: pipeline_store.list_leads(stage, token=tok))
     counts = await _pipeline(lambda: pipeline_store.funnel(token=tok))
     return {"leads": leads, "funnel": counts, "stages": pipeline_store.STAGES,
@@ -676,6 +689,38 @@ async def get_market_news(days: int = 7, source: str = "all", major: bool = True
         "sources": sorted({r["source"] for r in rows}),
         "status": "ok" if items else "empty",
     }
+
+
+# ── Monthly BD list (Tab 2) ──────────────────────────────────────────────────
+
+@app.get("/api/roster")
+async def get_roster():
+    """The four BD profiles (backend/data/bd_roster.json). Admin is implicit."""
+    from backend.pipeline import bd_list
+    return {"bds": [{"id": b["id"], "name": b["name"]} for b in bd_list.roster()]}
+
+
+@app.get("/api/bd-list")
+async def get_bd_list(month: str = "", authorization: str | None = Header(None)):
+    """This month's frozen list, generated on first request (a minute or so -
+    it reads the queue, Macro and the news archive). Every row: BD, instrument
+    to pitch, play, reason, sources with read dates. `inputs` says which
+    inputs were stale or unreachable when it was generated."""
+    import re as _re
+    if month and not _re.fullmatch(r"\d{4}-\d{2}", month):
+        raise HTTPException(status_code=400, detail="month must be YYYY-MM")
+    from backend.pipeline import bd_list
+    return await bd_list.get_or_generate(month or None)
+
+
+@app.post("/api/bd-list/regenerate")
+async def regenerate_bd_list(authorization: str | None = Header(None)):
+    """Build a new version of this month's list (the old one is kept). Needs a
+    signed-in session when sign-in is on - the list is the team's month."""
+    if pipeline_store.per_user() and not _bearer(authorization):
+        raise HTTPException(status_code=401, detail="sign in to regenerate the list")
+    from backend.pipeline import bd_list
+    return await bd_list.get_or_generate(force=True)
 
 
 # ── Macro (Tab 1): event -> sector -> named companies ────────────────────────

@@ -675,6 +675,63 @@ def test_fit_analysis_says_whether_ai_answered():
         fit_analyzer.chat, llm._providers = real_chat, real_prov
 
 
+def test_bd_list_is_frozen_and_every_row_is_explained():
+    """PREMORTEM section 4: the month's list is generated once and served from
+    the snapshot; a second request must not recompute (or reshuffle) it, and a
+    dead input is named rather than silently shrinking the list."""
+    import asyncio, tempfile
+    from pathlib import Path
+    from backend import database
+    from backend.pipeline import bd_list
+    real_db, real_client, real_gather = bd_list.DB_PATH, database.get_client, bd_list._gather
+    bd_list.DB_PATH = Path(tempfile.mkdtemp()) / "t.sqlite"
+    database.get_client = lambda: None
+    calls = {"n": 0}
+
+    async def fake_inputs():
+        calls["n"] += 1
+        by = {"ACME FINANCE": {"name": "Acme Finance Limited", "winnability": 45,
+                               "blocked": False, "is_lender": True, "win_reason": "",
+                               "signals": [{"kind": "debt_raise", "detail": "NCD allotment",
+                                            "text": "NSE filing: Allotment of NCDs",
+                                            "source": "NSE filing", "url": "https://nse.example/a",
+                                            "read_at": "2026-09-28"}]}}
+        return by, {"queue": {"status": "ok"}, "refinance": {"status": "unreachable"}}
+    bd_list._gather = fake_inputs
+    try:
+        first = asyncio.run(bd_list.get_or_generate())
+        again = asyncio.run(bd_list.get_or_generate())
+        assert calls["n"] == 1, "a frozen list was recomputed"
+        assert again["rows"] == first["rows"] and again["frozen"]
+        row = first["rows"][0]
+        assert row["bd_name"] == "Avinash" and row["instrument"] == "NCD / bond rating", row
+        assert row["reason"] and row["play"] and row["sources"][0]["read_at"], row
+        assert first["inputs"]["refinance"]["status"] == "unreachable"
+        forced = asyncio.run(bd_list.get_or_generate(force=True))
+        assert forced["version"] == 2 and calls["n"] == 2
+    finally:
+        bd_list.DB_PATH, database.get_client, bd_list._gather = real_db, real_client, real_gather
+
+
+def test_team_pipeline_view_needs_a_session():
+    """The Admin team view reads every BD's leads with the service key, so it
+    must still require a signed-in caller."""
+    import asyncio
+    from fastapi import HTTPException
+    from backend import main
+    from backend.pipeline import pipeline_store as ps
+    real = ps.per_user
+    ps.per_user = lambda: True
+    try:
+        try:
+            asyncio.run(main.get_saved_leads(scope="all", authorization=None))
+            raise AssertionError("anonymous caller got the team pipeline")
+        except HTTPException as e:
+            assert e.status_code == 401
+    finally:
+        ps.per_user = real
+
+
 def test_per_user_pipeline_refuses_an_anonymous_caller():
     """With Supabase configured, leads are per BD. A request with no session
     must get 401 - never the old shared SQLite list, which would mix four
