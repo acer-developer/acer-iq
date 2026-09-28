@@ -95,9 +95,9 @@ def remote(label: str, fn):
     """Run `fn(client)` against Supabase.
 
     Returns (True, result) when Supabase answered, (False, None) when it is not
-    configured or the call failed. A failure is logged, never raised: the caller
-    falls through to SQLite and a missing table (schema not yet run) must not
-    take a page down with it."""
+    configured, (False, exception) when the call failed. A failure is logged,
+    never raised: the caller falls through to SQLite and a missing table
+    (schema not yet run) must not take a page down with it."""
     client = get_client()
     if not client:
         return False, None
@@ -106,7 +106,7 @@ def remote(label: str, fn):
     except Exception as e:
         log.error("Supabase %s failed, falling back to SQLite (not durable in "
                   "production): %s: %s", label, type(e).__name__, e)
-        return False, None
+        return False, e
 
 
 # PostgREST caps a response at 1000 rows by default; read in pages below that.
@@ -147,6 +147,15 @@ def sqlite_at(path: Path, schema: str):
             yield con
     finally:
         con.close()
+
+
+def missing_table(err) -> bool:
+    """Is this failure "the table does not exist yet" (supabase_schema.sql not
+    re-run) rather than Supabase being down? The two need different answers:
+    a missing table is a known setup step, an outage must not be guessed past."""
+    text = f"{type(err).__name__}: {err}" if err else ""
+    return any(k in text for k in ("42P01", "PGRST205", "does not exist",
+                                   "Could not find the table", "schema cache"))
 
 
 def safe_url(url: str) -> str:

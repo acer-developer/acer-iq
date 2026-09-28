@@ -65,6 +65,12 @@ function InfoButton({ tabId }) {
 
 function TabBar({ active, onChange }) {
   const tabs = [
+    { id: "bdlist", icon: (
+      <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+        <path strokeLinecap="round" strokeLinejoin="round"
+          d="M15 19.128a9.38 9.38 0 002.625.372 9.337 9.337 0 004.121-.952 4.125 4.125 0 00-7.533-2.493M15 19.128v-.003c0-1.113-.285-2.16-.786-3.07M15 19.128v.106A12.318 12.318 0 018.624 21c-2.331 0-4.512-.645-6.374-1.766l-.001-.109a6.375 6.375 0 0111.964-3.07M12 6.375a3.375 3.375 0 11-6.75 0 3.375 3.375 0 016.75 0zm8.25 2.25a2.625 2.625 0 11-5.25 0 2.625 2.625 0 015.25 0z" />
+      </svg>
+    ), label: "This Month's Leads" },
     { id: "queue", icon: (
       <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
         <path strokeLinecap="round" strokeLinejoin="round"
@@ -77,12 +83,6 @@ function TabBar({ active, onChange }) {
           d="M12 21a9 9 0 100-18 9 9 0 000 18zm0 0c2.5-2.5 3.75-5.5 3.75-9S14.5 5.5 12 3m0 18c-2.5-2.5-3.75-5.5-3.75-9S9.5 5.5 12 3M3.5 9h17M3.5 15h17" />
       </svg>
     ), label: "Macro" },
-    { id: "bdlist", icon: (
-      <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-        <path strokeLinecap="round" strokeLinejoin="round"
-          d="M15 19.128a9.38 9.38 0 002.625.372 9.337 9.337 0 004.121-.952 4.125 4.125 0 00-7.533-2.493M15 19.128v-.003c0-1.113-.285-2.16-.786-3.07M15 19.128v.106A12.318 12.318 0 018.624 21c-2.331 0-4.512-.645-6.374-1.766l-.001-.109a6.375 6.375 0 0111.964-3.07M12 6.375a3.375 3.375 0 11-6.75 0 3.375 3.375 0 016.75 0zm8.25 2.25a2.625 2.625 0 11-5.25 0 2.625 2.625 0 015.25 0z" />
-      </svg>
-    ), label: "BD List" },
     { id: "radar", icon: (
       <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
         <path strokeLinecap="round" strokeLinejoin="round"
@@ -168,7 +168,11 @@ function ProfileSwitcher({ profileId, setProfileId, bds, me }) {
   // refuses the rest anyway - this just does not offer it).
   if (me && !me.admin) {
     const own = bds.find((b) => b.id === me.profile);
-    return <span className="text-xs font-semibold text-gray-700">{own ? own.name : me.email}</span>;
+    return own
+      ? <span className="text-xs font-semibold text-gray-700">{own.name}</span>
+      : <span className="text-xs text-amber-700" title="Ask Admin to add your email to backend/data/bd_roster.json">
+          {me.email} - not mapped to a BD profile yet
+        </span>;
   }
   return (
     <label className="flex items-center gap-1.5 text-xs text-gray-500">
@@ -186,7 +190,7 @@ function ProfileSwitcher({ profileId, setProfileId, bds, me }) {
 }
 
 function Workspace({ session }) {
-  const [activeTab, setActiveTab] = useState("queue");
+  const [activeTab, setActiveTab] = useState("bdlist");
   const [bds, setBds] = useState(DEFAULT_BDS);
   const [profileId, setProfileId] = useState(loadProfileId);
   React.useEffect(() => {
@@ -207,9 +211,13 @@ function Workspace({ session }) {
       }
     }).catch(() => {});
   }, [session?.user?.id]);
-  const bd = bds.find((b) => b.id === profileId);
-  const profile = bd ?? ADMIN;
-  const profileValue = { profile, bds, isAdmin: !bd };
+  // A signed-in non-admin is pinned to their own profile (the server enforces
+  // the same); one whose email is not in the roster yet has no profile and
+  // sees only their own pipeline.
+  const pinned = me && !me.admin;
+  const bd = bds.find((b) => b.id === (pinned ? me.profile : profileId));
+  const profile = bd ?? (pinned ? { id: "", name: me.email || "You" } : ADMIN);
+  const profileValue = { profile, bds, isAdmin: !pinned && !bd, me };
 
   // Find Leads (directory) state
   const [companies, setCompanies] = useState([]);

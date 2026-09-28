@@ -564,7 +564,8 @@ async def pipeline_schema():
     """What each stage move must record - the single source of truth the
     stage-move form is built from, so the UI and the validator never drift."""
     return {"stages": pipeline_store.STAGES,
-            "fields": {st: [{"name": f, "kind": k, "options": o, "required": r}
+            "fields": {st: [{"name": f, "kind": k, "options": o,
+                             "required": r and pipeline_store.MANDATORY_FIELDS}
                             for f, (k, o, r) in spec.items()]
                        for st, spec in pipeline_store.STAGE_FIELDS.items()},
             "instruments": pipeline_store.INSTRUMENTS}
@@ -1092,7 +1093,7 @@ async def health():
         # Logged at WARNING so an always-on host's log alerting can fire on it
         # without anything having to poll this endpoint.
         log.warning("health: degraded sources %s", ", ".join(degraded))
-    access = ("ADMIN_EMAILS set - Admin restricted" if settings.admin_emails.strip()
+    access = (f"Admin restricted to {settings.admin_emails.strip()}" if settings.admin_emails.strip()
               else "ADMIN_EMAILS not set - every signed-in user has Admin; keep Supabase sign-ups closed")
     return {
         "access": access,

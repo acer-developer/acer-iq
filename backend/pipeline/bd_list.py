@@ -532,8 +532,10 @@ def load(month: str) -> dict | None:
         if rows:
             return _decode(rows[0])
         return _load_local(month)      # a version stored while Supabase was down
-    if database.supabase_configured():
+    if database.supabase_configured() and not database.missing_table(rows):
         raise StoreUnavailable("BD list store unreachable - not regenerating a frozen list blind")
+    # bd_lists not created yet (schema not re-run): serve from SQLite and say
+    # "not durable" rather than fail the tab. Known setup gap, not an outage.
     try:
         with _connect() as con:
             r = con.execute("SELECT * FROM bd_lists WHERE month = ? ORDER BY version DESC"
@@ -804,6 +806,25 @@ def _demo() -> None:
             assert load("2026-09")["rows"] == rows
             _store(snap | {"version": 2, "rows": rows[:1]})
             assert load("2026-09")["version"] == 2 and load("2026-08") is None
+            # A missing table (schema not re-run) is a setup gap, not an outage:
+            # fall back to SQLite. A real outage raises.
+            real_conf = database.supabase_configured
+            database.supabase_configured = lambda: True
+            try:
+                database.get_client = lambda: type("C", (), {"table": lambda self, n: (_ for _ in ()).throw(
+                    RuntimeError("relation \"public.bd_lists\" does not exist (42P01)"))})()
+                assert load("2026-09")["version"] == 2
+                database.get_client = lambda: type("C", (), {"table": lambda self, n: (_ for _ in ()).throw(
+                    RuntimeError("connection refused"))})()
+                try:
+                    load("2026-09")
+                    raise AssertionError("an outage must not read as 'not found'")
+                except StoreUnavailable:
+                    pass
+            finally:
+                database.supabase_configured = real_conf
+                database.get_client = lambda: None
+
             # Without a readable pipeline, outcomes are not invented.
             from backend.pipeline import pipeline_store as _ps
             real_pu = _ps.per_user

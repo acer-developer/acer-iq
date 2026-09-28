@@ -70,6 +70,29 @@ STAGE_FIELDS: dict[str, dict[str, tuple]] = {
 }
 
 
+# Operator decision 2026-09-29: BDs use three statuses (Pending / In progress /
+# Closed-won-or-lost - SIMPLE_STATUS below), with no mandatory fields. The
+# field table is kept for anyone who does record detail, but nothing in it is
+# required any more. Overrides BD_LIST_SPEC.md section 3.
+MANDATORY_FIELDS = False
+
+# The three statuses the UI shows, mapped onto the stored stages (the
+# database constraint and every report already speak STAGES).
+SIMPLE_STATUS = {"Pending": "Identified", "In progress": "Contacted",
+                 "Won": "Mandated", "Lost": "Lost"}
+
+
+def simple_status(stage: str) -> str:
+    """Stored stage -> what a BD sees."""
+    if stage == "Identified":
+        return "Pending"
+    if stage == "Mandated":
+        return "Won"
+    if stage == "Lost":
+        return "Lost"
+    return "In progress"
+
+
 def validate_stage(stage: str, details: dict | None) -> dict:
     """The cleaned details for a move to `stage`, or ValueError naming every
     missing or invalid field - so the form can say exactly what to fill."""
@@ -83,7 +106,7 @@ def validate_stage(stage: str, details: dict | None) -> dict:
         v = details.get(field)
         v = v.strip() if isinstance(v, str) else v
         if v in (None, ""):
-            if required:
+            if required and MANDATORY_FIELDS:
                 problems.append(f"{field} is required")
             continue
         if kind == "choice" and v not in allowed:
@@ -104,7 +127,8 @@ def validate_stage(stage: str, details: dict | None) -> dict:
         elif kind == "text":
             v = str(v)[:300]
         clean[field] = v
-    if stage == "Lost" and clean.get("lost_reason") == "Lost to another CRA" and not clean.get("lost_to"):
+    if MANDATORY_FIELDS and stage == "Lost" and clean.get("lost_reason") == "Lost to another CRA" \
+            and not clean.get("lost_to"):
         problems.append("lost_to is required when lost_reason is 'Lost to another CRA'")
     if problems:
         raise ValueError(f"{stage} needs: " + "; ".join(problems))
@@ -981,7 +1005,17 @@ def _demo() -> None:
             assert got["flags"]["inc_tagged"] is True
             assert got["agencies"] == ["CARE", "INDRA"]
 
-            # Spec 3: a move without its mandatory fields is refused, naming them.
+            # Mandatory fields are off (operator decision); a bare move works,
+            # but a malformed value is still refused.
+            set_stage("Berar Finance Limited", "Contacted")
+            try:
+                set_stage("Berar Finance Limited", "Contacted", details={"channel": "Pigeon"})
+                raise AssertionError("an off-list channel should be refused")
+            except ValueError:
+                pass
+            set_stage("Berar Finance Limited", "Proposal", details=EXAMPLE_DETAILS["Proposal"])
+            global MANDATORY_FIELDS
+            MANDATORY_FIELDS = True
             try:
                 set_stage("Berar Finance Limited", "Contacted", details={"contact_name": "X"})
                 raise AssertionError("missing mandatory fields should be refused")
@@ -999,6 +1033,7 @@ def _demo() -> None:
                 raise AssertionError("lost_to should be required")
             except ValueError as e:
                 assert "lost_to" in str(e)
+            MANDATORY_FIELDS = False
             assert list_leads()[0]["stage_details"]["Proposal"]["size_cr"] == 200.0
             assert list_leads()[0]["next_followup_date"] == "2026-10-05"
 
@@ -1031,7 +1066,7 @@ def _demo() -> None:
             assert remove_lead("Berar Finance Limited") is False
             assert list_leads() == []
             hist = [e["event"] for e in events("Berar Finance Limited")]
-            assert hist == ["removed", "reassigned", "stage", "saved"], hist
+            assert hist == ["removed", "reassigned", "stage", "stage", "stage", "saved"], hist
 
             # De-duplication: same company, two spellings, one row.
             save_lead({"company_name": "Nova Capital Private Limited",

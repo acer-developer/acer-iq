@@ -107,8 +107,48 @@ function Row({ row, owner }) {
   );
 }
 
+function AllBDsTable({ rows, bds, status }) {
+  const name = (id) => bds.find((b) => b.id === id)?.name ?? id;
+  return (
+    <div className="overflow-x-auto rounded-xl border border-gray-200 bg-white">
+      <table className="w-full text-left text-xs">
+        <thead className="border-b border-gray-100 text-[10px] uppercase tracking-wide text-gray-400">
+          <tr>
+            <th className="px-4 py-2">BD</th><th className="py-2 pr-3">#</th><th className="pr-3">Company</th>
+            <th className="pr-3">Instrument</th><th className="pr-3">Urgency</th><th className="pr-3">Trigger</th>
+            <th className="pr-3">Pipeline status</th><th className="pr-3">Score</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-gray-100">
+          {rows.map((r) => {
+            const st = status[r.key];
+            return (
+              <tr key={`${r.bd_id}-${r.key}`} className="align-top">
+                <td className="px-4 py-1.5 font-semibold text-gray-900">{name(r.bd_id)}</td>
+                <td className="py-1.5 pr-3 text-gray-400">{r.rank}</td>
+                <td className="pr-3 text-gray-900" title={r.reason}>{r.company_name}
+                  {r.in_progress && <span className="ml-1 text-emerald-700">(in progress)</span>}
+                  {r.carried_over && <span className="ml-1 text-purple-700">(carried over)</span>}</td>
+                <td className="pr-3">{r.instrument}</td>
+                <td className={`pr-3 ${r.urgency === "This week" ? "font-semibold text-red-700" : ""}`}>{r.urgency}</td>
+                <td className="pr-3">{r.trigger.replace("_", " ")}</td>
+                <td className={`pr-3 ${st ? "text-gray-900" : "text-gray-400"}`}>
+                  {st ? `${st.stage}${st.owner && st.owner !== r.bd_id ? ` (with ${name(st.owner)})` : ""}` : "not worked yet"}
+                </td>
+                <td className="pr-3">{r.score}</td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 export default function BDListPage() {
   const { profile, bds, isAdmin } = useProfile();
+  const [adminView, setAdminView] = useState("all");
+  const [status, setStatus] = useState({});
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -134,8 +174,21 @@ export default function BDListPage() {
 
   useEffect(() => { load(); }, [load]);
 
+  // Admin: where each of this month's names stands in the team pipeline.
+  useEffect(() => {
+    if (!isAdmin) return;
+    apiFetch("/api/leads?scope=all").then((r) => (r.ok ? r.json() : { leads: [] })).then((d) => {
+      const m = {};
+      const fold = (n) => n.toUpperCase().replace(/\s+/g, " ").replace(/ (PRIVATE LIMITED|PVT LTD|PVT\. LTD\.|LIMITED|LTD\.|LTD)$/, "").replace(/[ .,-]+$/, "");
+      for (const l of d.leads ?? []) m[fold(l.company_name)] = { stage: l.stage, owner: l.owner };
+      setStatus(m);
+    }).catch(() => {});
+  }, [isAdmin, data]);
+
   const rows = data?.rows ?? [];
-  const shownBds = isAdmin ? bds : bds.filter((b) => b.id === profile.id);
+  const shownBds = isAdmin
+    ? (adminView === "all" ? bds : bds.filter((b) => b.id === adminView))
+    : bds.filter((b) => b.id === profile.id);
   const bad = Object.entries(data?.inputs ?? {}).filter(([k, v]) => !k.startsWith("_") && v.status !== "ok");
   const fill = data?.inputs?._fill ?? {};
 
@@ -145,7 +198,7 @@ export default function BDListPage() {
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <h2 className="text-sm font-bold text-gray-900">
-              BD List {data?.month && <span className="font-normal text-gray-500">- {data.month}</span>}
+              This Month's Leads {data?.month && <span className="font-normal text-gray-500">- {data.month}</span>}
               {!isAdmin && <span className="ml-2 font-normal text-gray-500">({profile.name})</span>}
             </h2>
             {data?.generated_at && (
@@ -163,6 +216,17 @@ export default function BDListPage() {
             </button>
           )}
         </div>
+        {isAdmin && data && (
+          <div className="mt-3 flex flex-wrap gap-1.5">
+            {[{ id: "all", name: `All BDs (${rows.length})` },
+              ...bds.map((b) => ({ id: b.id, name: `${b.name} (${rows.filter((r) => r.bd_id === b.id).length})` }))].map((o) => (
+              <button key={o.id} onClick={() => setAdminView(o.id)}
+                className={`rounded-lg px-3 py-1 text-xs font-medium ${adminView === o.id ? "bg-gray-900 text-white" : "border border-gray-200 bg-gray-50 text-gray-600 hover:bg-gray-100"}`}>
+                {o.name}
+              </button>
+            ))}
+          </div>
+        )}
         {bad.length > 0 && (
           <div className="mt-2 rounded-lg border border-red-200 bg-red-50 px-3 py-1.5 text-[11px] text-red-700">
             <span className="font-semibold">Built with stale inputs: </span>
@@ -186,7 +250,10 @@ export default function BDListPage() {
 
       {data && (
         <div className="flex-1 space-y-4 overflow-y-auto px-6 py-4">
-          {shownBds.map((b) => {
+          {isAdmin && adminView === "all" && rows.length > 0 && (
+            <AllBDsTable rows={rows} bds={bds} status={status} />
+          )}
+          {!(isAdmin && adminView === "all") && shownBds.map((b) => {
             const mine = rows.filter((r) => r.bd_id === b.id);
             return (
               <section key={b.id} className="rounded-xl border border-gray-200 bg-white">

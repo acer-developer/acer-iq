@@ -20,10 +20,10 @@ class Settings(BaseSettings):
     # Without it the archives fall back to SQLite and /api/health says so.
     supabase_service_key: str = ""
     # Comma-separated emails allowed the Admin actions (regenerate the month's
-    # list, reassign leads, see every BD's pipeline). Empty = every signed-in
-    # user - acceptable only while Supabase sign-ups are closed; /api/health
-    # says which mode is on.
-    admin_emails: str = ""
+    # list, reassign leads, see every BD's pipeline). Operator named
+    # developer@acerratings.com as Admin (2026-09-29); ADMIN_EMAILS on Render
+    # overrides this. Empty = every signed-in user.
+    admin_emails: str = "developer@acerratings.com"
     # Comma-separated exact origins. Empty = fall back to the regex below
     # (any *.vercel.app deploy + localhost dev), which is what prod uses.
     allowed_origins: str = ""

@@ -363,6 +363,7 @@ function TeamSummary() {
 
 export default function PipelinePage() {
   const { profile, bds, isAdmin } = useProfile();
+  const [ownerFilter, setOwnerFilter] = useState("all");
   const [leads, setLeads] = useState([]);
   const [funnel, setFunnel] = useState({});
   const [schema, setSchema] = useState(null);
@@ -377,7 +378,10 @@ export default function PipelinePage() {
     setLoading(true);
     setError("");
     try {
-      const q = isAdmin ? "?scope=all" : `?scope=all&owner=${encodeURIComponent(profile.id)}`;
+      // Admin: everyone. A BD: their profile's leads. Signed in but not yet
+      // mapped to a profile: just the rows their own login saved.
+      const q = isAdmin ? "?scope=all"
+        : profile.id ? `?scope=all&owner=${encodeURIComponent(profile.id)}` : "?scope=mine";
       const data = await jsonOrThrow(await apiFetch(`/api/leads${q}`));
       setLeads(data.leads ?? []);
       setFunnel(data.funnel ?? {});
@@ -393,12 +397,24 @@ export default function PipelinePage() {
   useEffect(() => { fetchLeads(); }, [fetchLeads]);
 
   const stages = schema?.stages ?? Object.keys(funnel);
+  // Admin can look at one BD at a time without leaving Admin.
+  const shown = !isAdmin || ownerFilter === "all" ? leads
+    : leads.filter((l) => (l.owner || "") === (ownerFilter === "unassigned" ? "" : ownerFilter));
+  const shownFunnel = {};
+  for (const s of stages) shownFunnel[s] = shown.filter((l) => l.stage === s).length;
 
   return (
     <div className="flex flex-1 flex-col overflow-hidden bg-gray-50">
       <div className="shrink-0 border-b border-gray-200 bg-white px-6 py-3">
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <h2 className="text-sm font-bold text-gray-900">{isAdmin ? "Team Pipeline (Admin)" : `${profile.name}'s Pipeline`}</h2>
+          <h2 className="text-sm font-bold text-gray-900">
+            {isAdmin ? "Team Pipeline (Admin)" : `${profile.name}'s Pipeline`}
+            {!isAdmin && !profile.id && (
+              <span className="ml-2 text-xs font-normal text-amber-700">
+                Your email is not mapped to a BD profile yet - showing only leads you saved yourself.
+              </span>
+            )}
+          </h2>
           <div className="flex items-center gap-2">
             <AddSelfSourced bds={bds} profile={profile} isAdmin={isAdmin} onDone={fetchLeads} />
             {leads.length > 0 && (
@@ -412,12 +428,24 @@ export default function PipelinePage() {
         <div className="mt-3 grid gap-3" style={{ gridTemplateColumns: `repeat(${Math.max(stages.length, 1)}, minmax(0,1fr))` }}>
           {stages.map((s) => (
             <div key={s} className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2">
-              <div className="text-lg font-bold text-gray-900">{funnel[s] ?? 0}</div>
+              <div className="text-lg font-bold text-gray-900">{shownFunnel[s] ?? 0}</div>
               <div className="text-[10px] uppercase tracking-wide text-gray-400">{s}</div>
             </div>
           ))}
         </div>
-        {isAdmin && <TeamSummary key={leads.length} />}
+        {isAdmin && (
+          <div className="mt-3 flex flex-wrap gap-1.5">
+            {[{ id: "all", name: `All BDs (${leads.length})` },
+              ...bds.map((b) => ({ id: b.id, name: `${b.name} (${leads.filter((l) => l.owner === b.id).length})` })),
+              { id: "unassigned", name: `Unassigned (${leads.filter((l) => !l.owner).length})` }].map((o) => (
+              <button key={o.id} onClick={() => setOwnerFilter(o.id)}
+                className={`rounded-lg px-3 py-1 text-xs font-medium ${ownerFilter === o.id ? "bg-gray-900 text-white" : "border border-gray-200 bg-gray-50 text-gray-600 hover:bg-gray-100"}`}>
+                {o.name}
+              </button>
+            ))}
+          </div>
+        )}
+        {isAdmin && ownerFilter === "all" && <TeamSummary key={leads.length} />}
       </div>
 
       {error && (
@@ -428,7 +456,7 @@ export default function PipelinePage() {
 
       {loading && <div className="flex flex-1 items-center justify-center text-sm text-gray-500">Loading pipeline...</div>}
 
-      {!loading && !error && leads.length === 0 && (
+      {!loading && !error && shown.length === 0 && (
         <div className="flex flex-1 items-center justify-center text-center">
           <div>
             <p className="text-sm font-medium text-gray-700">No leads in this pipeline yet.</p>
@@ -437,10 +465,10 @@ export default function PipelinePage() {
         </div>
       )}
 
-      {!loading && leads.length > 0 && (
+      {!loading && shown.length > 0 && (
         <div className="flex-1 space-y-6 overflow-y-auto px-6 py-4">
           {stages.map((stage) => {
-            const items = leads.filter((l) => l.stage === stage);
+            const items = shown.filter((l) => l.stage === stage);
             return (
               <div key={stage}>
                 <h3 className="mb-2 text-xs font-bold uppercase tracking-wide text-gray-400">
