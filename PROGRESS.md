@@ -26,7 +26,8 @@ touches a migration.
 - [x] **OP** ~~Run `supabase_schema.sql` in the Supabase SQL editor~~ (2026-09-28, project `gmqyelarfyqfsyqvrvzj`; all 4 tables present with RLS on; Render `SUPABASE_URL`/`SUPABASE_KEY` set, `/api/health` reports `Search store (supabase)`)
 - [x] **OP** ~~Enable Email auth provider~~ (2026-09-28, confirm-email on)
 - [x] **OP** ~~Add the Vercel app URL to auth redirect URLs~~ (2026-09-28, Site URL `https://acer-iq.vercel.app`, redirect `https://acer-iq.vercel.app/**`)
-- [ ] **OP** Decide always-on hosting (Oracle Always Free vs ~$7/mo)
+- [x] **OP** ~~Decide always-on hosting~~ (2026-09-28: **Oracle Cloud Always Free**)
+- [ ] **OP** Create the Oracle Always Free VM (Ubuntu, Mumbai/Hyderabad region, ports 80/443 open) and share its public IP
 - [ ] **OP** Decide: fold `acer-cra-tracker` in as the ingestion layer, or keep separate
 - [ ] **NB** Wire the login screen and switch `saved_leads` off SQLite *(unblocked 2026-09-28 — the 3 OP items above are done)*
 
