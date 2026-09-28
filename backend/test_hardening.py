@@ -602,6 +602,35 @@ def test_news_rows_carry_source_read_date_and_reason():
         main._news_polled["at"] = 0.0
 
 
+def test_macro_degrades_and_every_name_has_reason_and_source():
+    """Tab 1: a failed build is an honest empty with coverage saying so, not
+    a 500; and the join never names a company without a reason and a source."""
+    import asyncio
+    from backend import main
+    from backend.pipeline import macro
+
+    real = macro.build
+
+    async def boom(days):
+        raise RuntimeError("NSE down")
+    macro.build = boom
+    try:
+        out = asyncio.run(main.get_macro(days=14))
+        assert out["sectors"] == [] and out["coverage"]["stale_inputs"], out
+        assert "empty_means" in out and "freshness" in out
+    finally:
+        macro.build = real
+
+    ev = [{"subject": "RBI hikes repo rate", "source": "ET", "link": "https://x", "published": "",
+           "read_at": "2026-09-28", "sectors": ["nbfc"], "sector_labels": [], "why": ""}]
+    cov = [{"company_name": "Zeta Finance Limited", "interest_coverage": 0.7,
+            "verdict": "Interest coverage 0.7x - operating profit does not cover interest",
+            "source_url": "https://nse.example/x", "read_at": "2026-09-28"}]
+    blocks = macro.join(ev, [], cov, {}, set())
+    names = blocks[0]["companies"]
+    assert names and names[0]["reason"] and names[0]["triggers"][0]["url"], names
+
+
 def test_per_user_pipeline_refuses_an_anonymous_caller():
     """With Supabase configured, leads are per BD. A request with no session
     must get 401 - never the old shared SQLite list, which would mix four

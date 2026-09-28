@@ -4,6 +4,7 @@ import Sidebar from "./components/Sidebar.jsx";
 import CompanyCard from "./components/CompanyCard.jsx";
 import CompanyResearchPage from "./components/company/CompanyResearchPage.jsx";
 import MarketNewsPage from "./components/MarketNewsPage.jsx";
+import MacroPage from "./components/MacroPage.jsx";
 import SignalRadarPage from "./components/SignalRadarPage.jsx";
 import QueuePage from "./components/QueuePage.jsx";
 import PipelinePage from "./components/PipelinePage.jsx";
@@ -14,6 +15,7 @@ import { apiUrl } from "./lib/api.js";
 import { authConfigured, supabase } from "./lib/auth.js";
 
 const TAB_INFO = {
+  macro: "A big thing happened - who does it hit, and do they now need a rating? Takes the major macro events from the news archive (RBI and yields, crude, the rupee, sector regulation), tags the sectors they hit, and names the companies in those sectors with listed debt maturing inside 9 months or interest coverage too thin to absorb the shock, ranked by winnability. A join over data ACER-IQ already has, not a model: every name says why it is there and links to its sources.",
   queue: "One ranked list, highest winnability first. Winnability is not need - every CRA sees the same downgrade at the same hour. It asks whether ACER can realistically win the mandate: first-time borrowers, issuers tagged Issuer Not Cooperating, self-withdrawn ratings, and proven multi-CRA shoppers. A credit screen sits on top and can block a lead outright - that is different from a lead simply being low winnability.",
   radar: "Monitors public signals that indicate a company needs a credit rating soon: NCD/bond board approvals, rating withdrawals, surveillance renewals, and bank loan rating expirations. Signals come from BSE/NSE exchange filings and CRA press releases.",
   news: "Every NSE filing and business-press item ACER-IQ reads is kept in an archive, never discarded. 'Major only' shows what has a credit consequence - rating actions at other agencies, debt raises, credit stress, large capex and deals, and sector-wide macro moves; routine board filings and market chatter are hidden. Each row says why it matters to ACER, links to its source and shows the date it was read.",
@@ -66,6 +68,12 @@ function TabBar({ active, onChange }) {
           d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5" />
       </svg>
     ), label: "Ranked Queue" },
+    { id: "macro", icon: (
+      <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+        <path strokeLinecap="round" strokeLinejoin="round"
+          d="M12 21a9 9 0 100-18 9 9 0 000 18zm0 0c2.5-2.5 3.75-5.5 3.75-9S14.5 5.5 12 3m0 18c-2.5-2.5-3.75-5.5-3.75-9S9.5 5.5 12 3M3.5 9h17M3.5 15h17" />
+      </svg>
+    ), label: "Macro" },
     { id: "radar", icon: (
       <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
         <path strokeLinecap="round" strokeLinejoin="round"
@@ -283,6 +291,11 @@ function Workspace({ session }) {
       {/* Ranked Queue (live, default) */}
       {activeTab === "queue" && (
         <QueuePage />
+      )}
+
+      {/* Macro (Tab 1) */}
+      {activeTab === "macro" && (
+        <MacroPage />
       )}
 
       {/* Signal Radar (live) */}

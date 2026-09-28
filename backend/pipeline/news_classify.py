@@ -54,7 +54,7 @@ SECTORS: dict[str, tuple[str, str]] = {
     "metals":      ("Metals & mining",
                     r"\bsteel\b|iron ore|aluminium|\bcopper\b|\bzinc\b|\bmetals?\b|\bmining\b|\bcoal\b"),
     "oil_gas":     ("Oil & gas",
-                    r"\bcrude\b|\boil\b|natural gas|\bgas\b|petroleum|refiner(?:y|ies)|\bLNG\b|\bfuel\b"),
+                    r"\bcrude\b|\boil\b|natural gas|\bgas\b|petroleum|(?<!gold )refiner(?:y|ies)|\bLNG\b|\bfuel\b"),
     "auto":        ("Auto & EV",
                     r"\bauto(?:mobile|motive)?s?\b|\bvehicles?\b|\bEVs?\b|electric (?:bus|car|two)|"
                     r"two[- ]wheeler|tractors?|\bmotors\b"),

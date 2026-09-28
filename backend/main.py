@@ -660,6 +660,32 @@ async def get_market_news(days: int = 7, source: str = "all", major: bool = True
     }
 
 
+# ── Macro (Tab 1): event -> sector -> named companies ────────────────────────
+
+@app.get("/api/macro")
+async def get_macro(days: int = 14):
+    """Major macro events in the window, the sectors they hit, and the named
+    companies in those sectors with debt maturing inside 9 months or thin
+    interest coverage, ranked by winnability (backend/pipeline/macro.py).
+
+    Degrades rather than 500s: a dead input is named in `coverage` and the
+    list is built from what answered. Freshness rides along so an empty tab
+    says whether it is a quiet fortnight or a dead feed."""
+    if days < 1 or days > 90:
+        raise HTTPException(status_code=400, detail="days must be between 1 and 90")
+    from backend.pipeline import macro
+    from backend.pipeline.rss_news import FEED_NAMES
+    empty = {"events": [], "event_count": 0, "sectors": [], "named": 0,
+             "window_days": days,
+             "coverage": {"stale_inputs": ["macro build failed"],
+                          "note": "Macro list could not be built - see server log."}}
+    data = await _safe(macro.build(days), empty, "macro")
+    feeds = list(_NEWS_SOURCES) + list(FEED_NAMES) + ["BSE"]
+    fresh = [source_health.status(f) for f in feeds]
+    return {**data, "freshness": fresh,
+            "empty_means": source_health.summarise(fresh[:-1])}
+
+
 # ── Company Autocomplete ─────────────────────────────────────────────────────
 
 @app.get("/api/company-suggest")
