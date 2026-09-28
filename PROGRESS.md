@@ -6,7 +6,7 @@ Do not check an item that is not committed, tested and pushed.
 
 Owner: **OP** = operator (human, cannot be automated) · **NB** = nightly build.
 
-Last updated: 2026-09-28 · Phase in progress: **Phases 0–4 built and pushed** — operator: re-run `supabase_schema.sql` once more; Phase 5 next; Phase 6 blocked on the tracker decision
+Last updated: 2026-09-29 · Phase in progress: **Phases 0–4 built and pushed** — operator: re-run `supabase_schema.sql` once more; Phase 5 next; Phase 6 blocked on the tracker decision
 
 ---
 
@@ -37,6 +37,7 @@ touches a migration.
 - [x] **OP** ~~Vercel `VITE_SUPABASE_*`~~ (2026-09-28, done by operator; login live)
 - [ ] ~~**OP — morning step 3**~~ (done) Vercel → Settings → Environment Variables: add `VITE_SUPABASE_URL` = `https://gmqyelarfyqfsyqvrvzj.supabase.co` and `VITE_SUPABASE_ANON_KEY` = the **anon / publishable** key, then Redeploy. This turns on the login screen and per-BD pipelines.
 - [ ] **OP — morning step 4** Each of the four BDs: open the app → Create account → click the email link → sign in. Then Supabase → Authentication → Sign In / Providers → turn **off** "Allow new users to sign up", so nobody else can register.
+- [ ] **OP — optional** Send the four BDs' emails (→ `backend/data/bd_roster.json`) and set `ADMIN_EMAILS` (the Head of BD's email, comma-separated) in Render → Environment. Until then every signed-in user has Admin and a reassigned lead stays editable by its previous owner (`/api/health` → `access` says which mode is on).
 - [ ] **OP — check** `https://acer-iq.onrender.com/api/health` → `"status": "ok"`, `archives.*.durable: true`. The `health-alarm` GitHub workflow emails the repo owner whenever it is not.
 
 ## Phase 1 — Durable persistence *(REWRITTEN after the premortem)*

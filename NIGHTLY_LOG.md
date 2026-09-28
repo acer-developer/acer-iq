@@ -5,6 +5,71 @@ what was skipped and why, what is blocking.
 
 ---
 
+## 2026-09-29 (same session, continued — Phase 4, AI fix, production crash, review fixes)
+
+**Morning summary (read this first).**
+- **Live in production** (Render + Vercel, checked just now):
+  - `/api/health` is `ok`, and both archives are durable in Supabase (106 CRA actions, 608 news items).
+  - The login screen renders from the production bundle.
+  - Queue, Macro, News, Company Research and search all answer.
+- **Operator, 2 minutes:**
+  1. Run the whole of `supabase_schema.sql` in the Supabase SQL editor once more. Phase 4 added the `bd_lists` table and new `saved_leads` columns. Until then, moving a lead to the next stage fails in production and the BD list is not durable.
+  2. Each BD creates an account, then turn off "Allow new users to sign up" in Supabase.
+  3. Optional: put the four BDs' emails into `backend/data/bd_roster.json` and set `ADMIN_EMAILS` on Render. That lets each BD open on their own profile and own their leads, and restricts Admin actions to the head.
+- **Known external limit:** api.bseindia.com answers Akamai "Access Denied" to cloud IPs, so debt maturities (refinance) are unavailable. Every screen says so; nothing is faked.
+
+**What landed (each commit passed all four pre-push checks):**
+- `edf7aa5` **AI model fix.** OpenRouter retired `meta-llama/llama-3.3-70b-instruct:free`, the only model the code used, so every AI analysis had silently fallen back to the rule-based text.
+  - The model is now chosen from OpenRouter's live free-model list (cached 12h), falling through up to 3 models.
+  - Every answer is attributed ("Analysis: AI - model" or "Rule-based - why").
+  - Health reports whether AI actually answered.
+  - LLM JSON is filtered field by field.
+- `70dde96`, `5832088`, `daaccbf`, `2a31158` **Phase 4.** Built to **`BD_LIST_SPEC.md`**, written by a Head-of-BD reviewer in a gstack plan review.
+  - **Split:** each BD gets names from their own segment first (Hema NBFC/HFC/MFI, Avinash manufacturing, Akash infra/RE/power, Udit SME/BLR). A pool snake-fills any shortfall, and the list is never padded.
+  - **Rows:** each carries every spec field, with gaps labelled.
+  - **Pipeline:** mandatory fields per stage move, validated server-side; self-sourced leads; Admin reassign; team screen.
+  - **Month end:** outcomes recorded, and rollover follows the spec.
+  - **"View as" switcher:** Admin by default, plus Hema, Avinash, Akash, Udit.
+- `ad9ff49` **Production crash fix.** `/api/bd-list` returned 502: Render restarted the instance.
+  - Cause: registry lookups leaked one SQLite connection each (+59 MB per 30 lookups).
+  - The connection is now closed, and one batched registry read replaces about 200 lookups.
+  - The BD-list build peaks at 93 MB (was 233 MB); the free tier has 512 MB.
+- `bb3e5b4` **gstack review of Phase 4:** 6 critical and 7 info findings, all fixed.
+  - Tokens are verified with Supabase Auth, and Admin actions check `ADMIN_EMAILS`.
+  - Reassign moves real control (user_id) when the BD's email is mapped.
+  - A failed Supabase read never regenerates a frozen list.
+  - In-progress names roll over even without a fresh signal.
+  - Unreadable outcomes skip rollover instead of reshuffling.
+  - Mandated and Lost names are never re-listed.
+  - Dates use IST.
+  - Stage parsing survives "->" inside notes, and nan/inf are refused.
+  - The LLM fit score is clamped.
+- Also: `bd_roster.json` defines the four BDs as profiles. No real Supabase login accounts were created, because that would send confirmation emails to guessed addresses.
+
+**Checks:**
+- `backend.test_hardening`: 72 tests. Self-checks: bd_list, pipeline_store, llm, macro, news_classify, source_health, news_archive, action_history, database.
+- `npm run build` and the boot check passed before every push.
+- Browser QA (local, live feeds) covered: profile switch, BD list generation, add to pipeline, a stage move refused without its mandatory fields and then saved, and the Admin team screen.
+- The production bundle renders.
+
+**How this defends the premortem:**
+- **§1 Durability:** `bd_lists` uses the shared Supabase-with-SQLite-fallback helpers, and versions are inserted, never overwritten.
+- **§2 Empty vs broken:** "N of 10" says when an input was down, and stale inputs are named on the list.
+- **§3 Unattended deploys:** the crash was found by checking production after the deploy, not assumed away.
+- **§4 The monthly list:** frozen, deterministic, versioned, and never regenerated blind.
+- **§5 Name matching:** registry matches are exact only.
+- **§6 LLM:** a self-healing model choice with a rule-based fallback, labelled on screen.
+- **§7 Accountability:** verified identity, mandatory stage fields, a logged reassign, and outcomes recorded to `lead_events`.
+
+**Ponytails left:**
+- The BD-list score weights are judgement calls; the spec says to refit them after 3 months of outcomes.
+- The profile is a view, not a permission, until `ADMIN_EMAILS` and the roster emails are set.
+- Sector is inferred from company names.
+
+**Next:** Phase 5 (FreeLLMAPI). Phase 6 is blocked on the acer-cra-tracker decision.
+
+---
+
 ## 2026-09-28 (third run — operator-approved overnight build of Phases 0–3)
 
 **Morning summary (read this first).** Phases 0, 1, 2 and 3 are built, tested
