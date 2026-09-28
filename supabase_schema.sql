@@ -1,7 +1,7 @@
 -- ACER-IQ Supabase schema
 --
 -- Paste this into the Supabase SQL Editor and run it:
---   https://supabase.com/dashboard/project/zkqwzivrskdtbuacjvdg/sql/new
+--   https://supabase.com/dashboard/project/gmqyelarfyqfsyqvrvzj/sql/new
 --
 -- It cannot be run from the app: the publishable (anon) key has no DDL rights,
 -- which is correct and should stay that way.

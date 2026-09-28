@@ -23,12 +23,12 @@ touches a migration.
 
 ## Phase 0 — Foundations *(BLOCKING — see PREMORTEM §7)*
 
-- [ ] **OP** Run `supabase_schema.sql` in the Supabase SQL editor *(now also creates `cra_actions`, the CRA archive — safe to re-run, every statement is `if not exists` / `drop policy if exists`)*
-- [ ] **OP** Enable Email auth provider
-- [ ] **OP** Add the Vercel app URL to auth redirect URLs
+- [x] **OP** ~~Run `supabase_schema.sql` in the Supabase SQL editor~~ (2026-09-28, project `gmqyelarfyqfsyqvrvzj`; all 4 tables present with RLS on; Render `SUPABASE_URL`/`SUPABASE_KEY` set, `/api/health` reports `Search store (supabase)`)
+- [x] **OP** ~~Enable Email auth provider~~ (2026-09-28, confirm-email on)
+- [x] **OP** ~~Add the Vercel app URL to auth redirect URLs~~ (2026-09-28, Site URL `https://acer-iq.vercel.app`, redirect `https://acer-iq.vercel.app/**`)
 - [ ] **OP** Decide always-on hosting (Oracle Always Free vs ~$7/mo)
 - [ ] **OP** Decide: fold `acer-cra-tracker` in as the ingestion layer, or keep separate
-- [ ] **NB** Wire the login screen and switch `saved_leads` off SQLite *(needs the 3 OP items above)*
+- [ ] **NB** Wire the login screen and switch `saved_leads` off SQLite *(unblocked 2026-09-28 — the 3 OP items above are done)*
 
 ## Phase 1 — Durable persistence *(REWRITTEN after the premortem)*
 
