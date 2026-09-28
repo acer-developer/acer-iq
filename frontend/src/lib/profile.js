@@ -7,10 +7,10 @@ export const ADMIN = { id: "admin", name: "Admin" };
 // Mirrors backend/data/bd_roster.json; /api/roster is the source of truth and
 // replaces this once it loads, so a roster change needs no frontend deploy.
 export const DEFAULT_BDS = [
-  { id: "avinash", name: "Avinash" },
-  { id: "hema", name: "Hema" },
-  { id: "akash", name: "Akash" },
-  { id: "udit", name: "Udit" },
+  { id: "hema", name: "Hema", segment: "NBFC / HFC / MFI (incl. securitisation)" },
+  { id: "avinash", name: "Avinash", segment: "Manufacturing & large corporates" },
+  { id: "akash", name: "Akash", segment: "Infra, real estate, power & EPC" },
+  { id: "udit", name: "Udit", segment: "SME & bank loan ratings, first-time issuers" },
 ];
 
 const KEY = "acer-iq.profile";

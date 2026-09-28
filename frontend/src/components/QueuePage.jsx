@@ -2,12 +2,13 @@ import React, { useState, useEffect, useCallback } from "react";
 import { apiUrl } from "../lib/api.js";
 import { apiFetch } from "../lib/auth.js";
 import { EmptyState, FreshnessStrip } from "./SourceFreshness.jsx";
+import { useProfile } from "../lib/profile.js";
 
 // Saves to the signed-in BD's own pipeline (per-user via Supabase; the shared
 // SQLite list only when auth is not configured). The save is idempotent
 // server-side, so clicking Add on a company already at Proposal will not reset
 // it to Identified.
-async function saveLead(lead) {
+async function saveLead(lead, owner) {
   const res = await apiFetch("/api/leads", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -16,6 +17,8 @@ async function saveLead(lead) {
       winnability: lead.winnability,
       flags: lead.flags,
       agencies_seen: lead.agencies_seen,
+      owner: owner || "",
+      origin: "list",
     }),
   });
   if (!res.ok) {
@@ -132,6 +135,7 @@ function QueueRow({ lead, onAdd, saved, busy, addError }) {
 }
 
 export default function QueuePage() {
+  const { profile, isAdmin } = useProfile();
   const [leads, setLeads] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -145,7 +149,8 @@ export default function QueuePage() {
     setBusy((b) => new Set(b).add(name));
     setAddErrors((e) => ({ ...e, [name]: undefined }));
     try {
-      await saveLead(lead);
+      // Saved to the profile in view; Admin saves unassigned (reassign later).
+      await saveLead(lead, isAdmin ? "" : profile.id);
       setSaved((s) => new Set(s).add(name));
     } catch (err) {
       // Never fail silently: someone would believe a lead is tracked when it
@@ -158,7 +163,7 @@ export default function QueuePage() {
         return next;
       });
     }
-  }, []);
+  }, [isAdmin, profile.id]);
 
   const [freshness, setFreshness] = useState({ rows: [], verdict: null });
 
@@ -173,7 +178,8 @@ export default function QueuePage() {
       setCoverage(data.coverage ?? null);
       setFreshness({ rows: data.freshness ?? [], verdict: data.empty_means ?? null });
       try {
-        const savedRes = await apiFetch("/api/leads");
+        // Team-wide, so a name another BD already holds shows as saved.
+        const savedRes = await apiFetch("/api/leads?scope=all");
         if (savedRes.ok) {
           const s = await savedRes.json();
           setSaved(new Set((s.leads ?? []).map((l) => l.company_name)));

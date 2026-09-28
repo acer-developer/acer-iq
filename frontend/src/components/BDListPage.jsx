@@ -13,7 +13,8 @@ function readDate(iso) {
     : d.toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
 }
 
-const INPUT_LABEL = { queue: "Rating-action queue", macro: "Macro", news: "Company news", refinance: "Debt maturities (BSE)" };
+const INPUT_LABEL = { queue: "Rating-action queue", macro: "Macro", news: "Company news",
+                      refinance: "Debt maturities (BSE)", pipeline: "ACER history (pipeline)" };
 
 async function addToPipeline(row, owner) {
   const res = await apiFetch("/api/leads", {
@@ -21,8 +22,10 @@ async function addToPipeline(row, owner) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       company_name: row.company_name, winnability: row.winnability,
-      flags: { bd_list: true, signals: row.signals, instrument: row.instrument },
-      agencies_seen: [], owner,
+      flags: { bd_list: true, signals: row.signals, instrument: row.instrument,
+               trigger: row.trigger, urgency: row.urgency },
+      agencies_seen: [], owner, cin: row.cin && row.cin !== "CIN not found" ? row.cin : undefined,
+      origin: "list", reason: row.reason,
     }),
   });
   if (!res.ok) {
@@ -30,6 +33,18 @@ async function addToPipeline(row, owner) {
     throw new Error(res.status === 401 ? "sign in to save leads" : body.detail ?? `HTTP ${res.status}`);
   }
   return res.json();
+}
+
+const URGENCY = { "This week": "border-red-200 bg-red-50 text-red-700", "This month": "border-gray-200 bg-gray-50 text-gray-600" };
+
+function Fact({ label, value }) {
+  const gap = /not known|not visible|not found|unavailable|not sourced|none listed|No ACER history/i.test(value ?? "");
+  return (
+    <div className="min-w-0">
+      <dt className="text-[10px] uppercase tracking-wide text-gray-400">{label}</dt>
+      <dd className={`truncate text-xs ${gap ? "text-gray-400 italic" : "text-gray-800"}`} title={value}>{value}</dd>
+    </div>
+  );
 }
 
 function Row({ row, owner }) {
@@ -42,38 +57,51 @@ function Row({ row, owner }) {
     } catch (e) { setState(`failed: ${e.message}`); }
   };
   return (
-    <li className="flex items-start gap-3 px-5 py-3">
-      <span className="w-6 shrink-0 pt-0.5 text-right font-mono text-xs text-gray-400">{row.rank}</span>
-      <div className="min-w-0 flex-1">
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="text-sm font-semibold text-gray-900">{row.company_name}</span>
-          <span className="rounded-full border border-blue-200 bg-blue-50 px-2 py-0.5 text-[10px] font-bold text-blue-700">
-            {row.instrument}
-          </span>
-          <span className="text-[10px] text-gray-400">
-            winnability {row.winnability ?? "?"} · score {row.score}
-          </span>
+    <li className="px-5 py-3">
+      <div className="flex items-start gap-3">
+        <span className="w-6 shrink-0 pt-0.5 text-right font-mono text-xs text-gray-400">{row.rank}</span>
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-sm font-semibold text-gray-900">{row.company_name}</span>
+            <span className="font-mono text-[10px] text-gray-400">{row.cin}</span>
+            <span className="rounded-full border border-blue-200 bg-blue-50 px-2 py-0.5 text-[10px] font-bold text-blue-700"
+              title={row.instrument_detail}>{row.instrument}</span>
+            <span className={`rounded-full border px-2 py-0.5 text-[10px] font-bold ${URGENCY[row.urgency] ?? URGENCY["This month"]}`}>{row.urgency}</span>
+            <span className="rounded-full border border-gray-200 px-2 py-0.5 text-[10px] text-gray-500">{row.trigger.replace("_", " ")}</span>
+            {row.carried_over && <span className="rounded-full border border-purple-200 bg-purple-50 px-2 py-0.5 text-[10px] font-bold text-purple-700">Carried over</span>}
+            {row.in_progress && <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[10px] font-bold text-emerald-700">In progress: {row.in_progress}</span>}
+            <span className="text-[10px] text-gray-400">score {row.score} · winnability {row.winnability ?? "?"}</span>
+          </div>
+          <p className="mt-1 text-xs text-gray-700">{row.reason}</p>
+          <p className="mt-0.5 text-xs font-medium text-gray-800"><span className="text-blue-600">Play: </span>{row.play}</p>
+          <dl className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1 md:grid-cols-4">
+            <Fact label={`Segment${row.segment_inferred ? " (inferred from name)" : ""}`} value={row.segment} />
+            <Fact label="Size" value={row.size_cr} />
+            <Fact label="Current agency" value={row.current_agency} />
+            <Fact label="Latest rating" value={row.latest_rating} />
+            <Fact label="Debt maturity" value={row.maturity_date} />
+            <Fact label="Contact route" value={row.contact_route} />
+            <Fact label="ACER history" value={row.acer_history} />
+          </dl>
+          <p className="mt-1.5 text-[11px] text-gray-400">
+            {row.sources.map((s, i) => (
+              <span key={i}>
+                {i > 0 && " · "}
+                {safeUrl(s.url) ? <a href={safeUrl(s.url)} target="_blank" rel="noreferrer" className="text-blue-600 hover:underline">{s.label}</a> : s.label}
+                {s.read_at && <> read {readDate(s.read_at)}</>}
+              </span>
+            ))}
+          </p>
         </div>
-        <p className="mt-0.5 text-xs text-gray-700">{row.reason}</p>
-        <p className="mt-0.5 text-xs font-medium text-gray-800"><span className="text-blue-600">Play: </span>{row.play}</p>
-        <p className="mt-1 text-[11px] text-gray-400">
-          {row.sources.map((s, i) => (
-            <span key={i}>
-              {i > 0 && " · "}
-              {safeUrl(s.url) ? <a href={safeUrl(s.url)} target="_blank" rel="noreferrer" className="text-blue-600 hover:underline">{s.label}</a> : s.label}
-              {s.read_at && <> read {readDate(s.read_at)}</>}
-            </span>
-          ))}
-        </p>
-      </div>
-      <div className="shrink-0 text-right">
-        <button onClick={add} disabled={state === "saving" || state === "added"}
-          className="rounded-lg border border-gray-200 bg-white px-2.5 py-1 text-xs font-medium text-gray-600 hover:bg-gray-50 disabled:opacity-50">
-          {state === "added" ? "In pipeline" : state === "saving" ? "Saving..." : "Add to pipeline"}
-        </button>
-        {state && state !== "saving" && state !== "added" && (
-          <p className={`mt-1 max-w-[12rem] text-[10px] ${state.startsWith("failed") ? "text-red-600" : "text-gray-500"}`}>{state}</p>
-        )}
+        <div className="shrink-0 text-right">
+          <button onClick={add} disabled={state === "saving" || state === "added"}
+            className="rounded-lg border border-gray-200 bg-white px-2.5 py-1 text-xs font-medium text-gray-600 hover:bg-gray-50 disabled:opacity-50">
+            {state === "added" ? "In pipeline" : state === "saving" ? "Saving..." : "Add to pipeline"}
+          </button>
+          {state && state !== "saving" && state !== "added" && (
+            <p className={`mt-1 max-w-[12rem] text-[10px] ${state.startsWith("failed") ? "text-red-600" : "text-gray-500"}`}>{state}</p>
+          )}
+        </div>
       </div>
     </li>
   );
@@ -108,7 +136,8 @@ export default function BDListPage() {
 
   const rows = data?.rows ?? [];
   const shownBds = isAdmin ? bds : bds.filter((b) => b.id === profile.id);
-  const bad = Object.entries(data?.inputs ?? {}).filter(([, v]) => v.status !== "ok");
+  const bad = Object.entries(data?.inputs ?? {}).filter(([k, v]) => !k.startsWith("_") && v.status !== "ok");
+  const fill = data?.inputs?._fill ?? {};
 
   return (
     <div className="flex flex-1 flex-col overflow-hidden bg-gray-50">
@@ -162,8 +191,13 @@ export default function BDListPage() {
             return (
               <section key={b.id} className="rounded-xl border border-gray-200 bg-white">
                 <header className="flex items-center justify-between border-b border-gray-100 px-5 py-3">
-                  <h3 className="text-sm font-bold text-gray-900">{b.name}</h3>
-                  <span className="text-[11px] text-gray-400">{mine.length} name{mine.length === 1 ? "" : "s"}</span>
+                  <div>
+                    <h3 className="text-sm font-bold text-gray-900">{b.name}</h3>
+                    {b.segment && <p className="text-[11px] text-gray-400">{b.segment}</p>}
+                  </div>
+                  <span className={`text-[11px] ${fill[b.id]?.note ? "font-semibold text-amber-700" : "text-gray-400"}`}>
+                    {fill[b.id]?.note || `${fill[b.id]?.filled ?? mine.length} of ${fill[b.id]?.of ?? 10} new names`}
+                  </span>
                 </header>
                 {mine.length === 0 ? (
                   <p className="px-5 py-3 text-xs text-gray-500">

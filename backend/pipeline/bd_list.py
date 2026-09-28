@@ -345,10 +345,16 @@ def _registry(name: str) -> dict:
 def _history() -> tuple[dict, bool]:
     """norm name -> ACER's history with the company, across every BD's
     pipeline (service key). (history, readable)."""
-    ok, saved = database.remote("bd_list history saved", lambda c: database.select_all(
-        c, "saved_leads", "company_name,user_id,stage,owner", ("user_id", "company_name")))
-    ok2, events = database.remote("bd_list history events", lambda c: database.select_all(
-        c, "lead_events", "id,company_name,event,detail,at", ("id",)))
+    from backend.pipeline import pipeline_store
+    if not pipeline_store.per_user():
+        # No Supabase at all (local dev): the SQLite pipeline is the whole store.
+        saved = pipeline_store._local_list_leads()
+        events, ok, ok2 = pipeline_store._local_events(None, 5000), True, True
+    else:
+        ok, saved = database.remote("bd_list history saved", lambda c: database.select_all(
+            c, "saved_leads", "company_name,user_id,stage,owner", ("user_id", "company_name")))
+        ok2, events = database.remote("bd_list history events", lambda c: database.select_all(
+            c, "lead_events", "id,company_name,event,detail,at", ("id",)))
     if not ok:
         return {}, False
     out: dict[str, str] = {}
@@ -591,14 +597,20 @@ def record_outcomes(snap: dict) -> dict:
     append month_end rows to lead_events for names somebody saved (the event
     needs the saver's user id). Needs the service key to read every BD's
     pipeline; without it, outcomes cannot be seen and are not faked."""
-    ok, saved = database.remote("bd_list outcomes read", lambda c: database.select_all(
-        c, "saved_leads", "company_name,user_id,stage", ("user_id", "company_name")))
+    from backend.pipeline import pipeline_store
+    local = not pipeline_store.per_user()
+    if local:
+        saved, ok = pipeline_store._local_list_leads(), True
+        events, ok2 = pipeline_store._local_events(None, 5000), True
+    else:
+        ok, saved = database.remote("bd_list outcomes read", lambda c: database.select_all(
+            c, "saved_leads", "company_name,user_id,stage", ("user_id", "company_name")))
+        ok2, events = (database.remote("bd_list outcomes events read", lambda c: database.select_all(
+            c, "lead_events", "id,company_name,event,detail,at", ("id",))) if ok else (False, []))
     if not ok:
         log.warning("bd_list: month-end outcomes for %s not recorded - saved_leads unreadable",
                     snap.get("month"))
         return snap
-    ok2, events = database.remote("bd_list outcomes events read", lambda c: database.select_all(
-        c, "lead_events", "id,company_name,event,detail,at", ("id",)))
     outcomes = outcomes_from(snap.get("rows", []), saved, events if ok2 else [], snap["month"])
     by_name = {norm_name(s["company_name"]): s for s in saved or []}
     rows_ev = [{"company_name": by_name[r["key"]]["company_name"],
@@ -606,9 +618,16 @@ def record_outcomes(snap: dict) -> dict:
                 "detail": f"BD list {snap['month']} ({r['bd_name']}): "
                           f"{outcomes[r['company_name']]['stage']}"}
                for r in snap.get("rows", []) if r["key"] in by_name]
-    if rows_ev:
+    if rows_ev and not local:
         database.remote("bd_list outcomes events",
                         lambda c: c.table("lead_events").insert(rows_ev).execute())
+    elif local:
+        with pipeline_store._connect() as con:
+            for r in snap.get("rows", []):
+                if r["key"] in by_name:
+                    pipeline_store._event(con, by_name[r["key"]]["company_name"], "month_end",
+                                          f"BD list {snap['month']} ({r['bd_name']}): "
+                                          f"{outcomes[r['company_name']]['stage']}")
     snap = snap | {"outcomes": outcomes}
     _store(snap)
     return snap
@@ -710,7 +729,13 @@ def _demo() -> None:
             _store(snap | {"version": 2, "rows": rows[:1]})
             assert load("2026-09")["version"] == 2 and load("2026-08") is None
             # Without a readable pipeline, outcomes are not invented.
-            assert record_outcomes(load("2026-09")).get("outcomes") is None
+            from backend.pipeline import pipeline_store as _ps
+            real_pu = _ps.per_user
+            _ps.per_user = lambda: True
+            try:
+                assert record_outcomes(load("2026-09")).get("outcomes") is None
+            finally:
+                _ps.per_user = real_pu
         finally:
             DB_PATH, database.get_client = real, real_client
     assert _prev_month("2026-01") == "2025-12"

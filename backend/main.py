@@ -752,7 +752,8 @@ async def get_market_news(days: int = 7, source: str = "all", major: bool = True
 async def get_roster():
     """The four BD profiles (backend/data/bd_roster.json). Admin is implicit."""
     from backend.pipeline import bd_list
-    return {"bds": [{"id": b["id"], "name": b["name"]} for b in bd_list.roster()]}
+    return {"bds": [{"id": b["id"], "name": b["name"], "segment": b.get("segment", "")}
+                    for b in bd_list.roster()]}
 
 
 @app.get("/api/bd-list")

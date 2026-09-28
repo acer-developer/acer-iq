@@ -100,6 +100,12 @@ _ROUTINE = _P(r"outcome of board meeting|board meeting intimation|\bbonus\b|\bdi
               r"\bAGM\b|annual general meeting|trading window|appoint(?:s|ed|ment)|resign|"
               r"change in (?:director|management|kmp)|newspaper publication|investor (?:meet|presentation)|"
               r"analysts?/institutional|loss of share certificate|closure of trading")
+# Servicing existing debt, not raising new debt: an NCD's record date, interest
+# payment, redemption or the exchange suspending it at maturity. Found on live
+# data 2026-09-28 ("Suspension of Trading" read as a debt raise).
+_DEBT_SERVICING = _P(r"suspension of trading|redemption|record date|payment of interest|"
+                     r"interest payment|intimation of (?:interest|principal)|"
+                     r"due for (?:payment|redemption)|servicing of")
 _SAST = _P(r"takeover regulations|\bSAST\b|regulation 29|regulation 31|disclosure under sebi")
 _RATING = _P(r"credit rating|\brating\b.*\b(?:assign|upgrad|downgrad|reaffirm|revis|withdraw|"
              r"outlook)|\b(?:CRISIL|ICRA|CARE Ratings|India Ratings|Acuit[eé]|Brickwork|Infomerics)\b")
@@ -181,6 +187,8 @@ def _kind(item: dict, text: str) -> str:
     if not is_nse and not item.get("company") and _MACRO.search(subject) \
             and not _COMPANY_ACTION.search(subject):
         return "macro"
+    if is_nse and _DEBT_SERVICING.search(subject):
+        return "board_routine"          # paying existing debt, not raising new
     if _DEBT.search(text) and not _EQUITY.search(subject):
         return "debt_raise"
     if is_nse and _SAST.search(text):
@@ -340,6 +348,13 @@ def _demo() -> None:
     assert c("Top stocks in focus tomorrow: Investors must watch HCL Tech, NCC")["kind"] == "market_chatter"
     assert c("Global Market: European shares edge higher as housebuilders rally",
              description="bond yields fell")["kind"] == "market_chatter"
+
+    # Servicing existing NCDs is routine, not a debt raise.
+    sus = c("Suspension of Trading", "NSE", "Aditya Birla Capital Limited",
+            "suspension of trading of NCDs on account of redemption")
+    assert sus["kind"] == "board_routine" and not sus["major"], sus
+    assert c("Allotment of Securities", "NSE", "IIFL Finance Limited",
+             "allotment of Non-Convertible Debentures")["kind"] == "debt_raise"
 
     # Every item has a reason; nothing blanks.
     for subj in ("", "Quote of the day by Howard Marks", "Truecaller launches scam checker"):
