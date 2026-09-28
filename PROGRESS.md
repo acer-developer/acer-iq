@@ -98,5 +98,12 @@ Admin (default) / Hema / Avinash / Akash / Udit.
 2. No dummy data. Ever.
 3. Every figure carries a source + read date. Every item carries a reason.
 4. Tests pass before commit. App boots and `/api/health` answers before push.
-5. Blocked is a fine outcome — write why in `NIGHTLY_LOG.md` and stop. A
+5. **Operator rule (2026-09-29): every design decision goes to a "Head of BD"
+   reviewer first** — spawn an agent playing ACER's Head of BD, give it the
+   options, let it decide fields / what is mandatory / what Admin sees, then
+   build to its answer and record it in `BD_LIST_SPEC.md`. Use gstack (plan
+   review before, pre-landing review after) and `ponytail:` comments on shortcuts.
+6. **Operator rule: statuses, not stages.** BDs use Pending / In progress /
+   Closed (Won or Lost). Do not re-add stage forms or mandatory fields.
+7. Blocked is a fine outcome — write why in `NIGHTLY_LOG.md` and stop. A
    plausible-looking fake is the only unacceptable one.

@@ -5,6 +5,38 @@ what was skipped and why, what is blocking.
 
 ---
 
+## 2026-09-29 (same session — operator feedback round)
+
+**What the operator asked, and what landed:**
+- **"No module that states this month's leads":**
+  - The BD List tab is now **This Month's Leads**: it's the first tab and the one the app opens on. (`82d95b2`)
+  - Admin gets **All BDs**: per-BD cards plus one table of every name, with a tab for each BD. The Pipeline has the same filter.
+- **"developer@acerratings.com as admin":** now the default for `ADMIN_EMAILS` in `config.py`; setting it on Render overrides. (`82d95b2`)
+- **"No stages, just 2-3 statuses":** decided with the Head-of-BD reviewer within that rule; `BD_LIST_SPEC.md` §3 was rewritten. (`e9016b1`)
+  - Pending / In progress / Closed, where Closed requires Won or Lost; a Lost reason and a note are optional.
+  - Who changed it and when is stamped automatically.
+  - Staleness (7 / 14 days) replaces follow-up dates.
+  - Stored stages are unchanged underneath.
+- **The BD List no longer errors while the schema is not re-run:** a missing table is a setup gap and falls back to SQLite, marked "Not durable"; a real outage still refuses to regenerate blind. (`82d95b2`)
+
+**Standing operator rules** (also in `PROGRESS.md`):
+- Every design decision goes to a Head-of-BD reviewer agent first.
+- Statuses, not stages.
+- gstack reviews before and after every change; `ponytail:` comments on shortcuts.
+
+**Checks:**
+- `test_hardening` passes, with a new test for the status model.
+- Self-checks pass.
+- Build and boot check pass.
+- Browser QA (local, live feeds): a BD sets In progress and Closed→Won from the list, the Admin cards and table show them, and the Pipeline groups them.
+
+**Operator still to do:**
+- Re-run `supabase_schema.sql`. It adds `bd_lists` and the new columns; until then the list works but is not saved permanently.
+- Create the accounts.
+- Close sign-ups.
+
+---
+
 ## 2026-09-29 (same session, continued — Phase 4, AI fix, production crash, review fixes)
 
 **Morning summary (read this first).**
