@@ -463,11 +463,22 @@ class SaveLeadRequest(BaseModel):
     agencies_seen: list[str] | None = None
     # BD profile the lead belongs to (bd_roster.json id); "" for Admin.
     owner: str | None = None
+    # "list" (from the monthly BD list / queue) or "self_sourced" (the BD's
+    # own lead - needs a CIN and a one-sentence reason, BD_LIST_SPEC.md 3).
+    origin: str | None = None
+    reason: str | None = None
 
 
 class StageRequest(BaseModel):
     stage: str
     note: str = ""
+    # The stage's mandatory fields (pipeline_store.STAGE_FIELDS).
+    details: dict | None = None
+
+
+class ReassignRequest(BaseModel):
+    owner: str
+    reason: str
 
 
 @app.get("/api/leads")
@@ -508,8 +519,11 @@ async def get_lead_events(company_name: str | None = None, limit: int = 200,
 async def add_saved_lead(req: SaveLeadRequest,
                          authorization: str | None = Header(None)):
     tok = _bearer(authorization)
+    lead = req.model_dump()
     try:
-        return await _pipeline(lambda: pipeline_store.save_lead(req.model_dump(), token=tok))
+        if lead.get("origin") == "self_sourced":
+            pipeline_store.validate_self_sourced(lead)
+        return await _pipeline(lambda: pipeline_store.save_lead(lead, token=tok))
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -520,11 +534,52 @@ async def move_saved_lead(company_name: str, req: StageRequest,
     tok = _bearer(authorization)
     try:
         return await _pipeline(lambda: pipeline_store.set_stage(
-            company_name, req.stage, req.note, token=tok))
+            company_name, req.stage, req.note, token=tok, details=req.details))
     except KeyError:
         raise HTTPException(status_code=404, detail=f"{company_name} is not saved")
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.post("/api/leads/{company_name}/reassign")
+async def reassign_lead(company_name: str, req: ReassignRequest,
+                        authorization: str | None = Header(None)):
+    """Admin only (BD_LIST_SPEC.md 4): move a lead to another BD with a reason."""
+    from backend.pipeline import bd_list
+    tok = _bearer(authorization)
+    owners = {b["id"] for b in bd_list.roster()}
+    try:
+        return await _pipeline(lambda: pipeline_store.reassign(
+            company_name, req.owner, req.reason, tok, owners))
+    except KeyError:
+        raise HTTPException(status_code=404, detail=f"{company_name} is not saved")
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.get("/api/pipeline/schema")
+async def pipeline_schema():
+    """What each stage move must record - the single source of truth the
+    stage-move form is built from, so the UI and the validator never drift."""
+    return {"stages": pipeline_store.STAGES,
+            "fields": {st: [{"name": f, "kind": k, "options": o, "required": r}
+                            for f, (k, o, r) in spec.items()]
+                       for st, spec in pipeline_store.STAGE_FIELDS.items()},
+            "instruments": pipeline_store.INSTRUMENTS}
+
+
+@app.get("/api/pipeline/team")
+async def pipeline_team(authorization: str | None = Header(None)):
+    """The Admin screen: per BD coverage, funnel, conversion, Rs cr and fees,
+    overdue follow-ups, lost reasons, self-sourced count, and clashes."""
+    from backend.pipeline import bd_list
+    tok = _bearer(authorization)
+    leads = await _pipeline(lambda: pipeline_store.list_all_leads(tok))
+    snap = await asyncio.to_thread(bd_list.load, bd_list.month_key())
+    summary = pipeline_store.team_summary(leads, (snap or {}).get("rows", []), bd_list.roster())
+    return summary | {"month": bd_list.month_key(), "list_generated": bool(snap),
+                      "stale_inputs": [k for k, v in ((snap or {}).get("inputs") or {}).items()
+                                       if not k.startswith("_") and v.get("status") != "ok"]}
 
 
 @app.delete("/api/leads/{company_name}")

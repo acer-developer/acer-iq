@@ -38,6 +38,82 @@ DB_PATH = Path(__file__).parent.parent / "registry" / "data" / "pipeline.sqlite"
 
 STAGES = ["Identified", "Contacted", "Meeting", "Proposal", "Mandated", "Lost"]
 
+# -- What a BD must record at each stage move (BD_LIST_SPEC.md section 3) ------
+# Without next_followup_date there is no overdue list; without fee and size
+# there is no revenue view - so these are refused, not just encouraged.
+INSTRUMENTS = ["NCD", "CP", "BLR-LT", "BLR-ST", "Securitisation/PTC", "Other"]
+CHANNELS = ["Email", "Call", "In-person", "Via banker", "LinkedIn"]
+AGENCIES = ["CRISIL", "ICRA", "CARE", "India Ratings", "Acuite", "Infomerics", "Other"]
+LOST_REASONS = ["Price", "Turnaround time", "Lost to another CRA", "Existing agency retained",
+                "Issuer deferred/dropped issue", "Banker/lender preference",
+                "Credit concern (ACER declined)", "No response after 3 attempts", "Not a fit"]
+
+# field -> (kind, allowed values or None, required)
+STAGE_FIELDS: dict[str, dict[str, tuple]] = {
+    "Identified": {},
+    "Contacted": {"contact_name": ("text", None, True), "designation": ("text", None, True),
+                  "channel": ("choice", CHANNELS, True), "contact_date": ("date", None, True),
+                  "next_followup_date": ("date", None, True)},
+    "Meeting": {"meeting_date": ("date", None, True), "attendees_client": ("text", None, True),
+                "attendees_acer": ("text", None, True),
+                "instrument_discussed": ("choice", INSTRUMENTS, True),
+                "next_followup_date": ("date", None, True)},
+    "Proposal": {"proposal_date": ("date", None, True), "instrument": ("choice", INSTRUMENTS, True),
+                 "size_cr": ("number", None, True), "fee_quoted_rs": ("number", None, True),
+                 "competing_agency": ("choice", AGENCIES + ["Unknown"], True),
+                 "next_followup_date": ("date", None, True)},
+    "Mandated": {"mandate_date": ("date", None, True), "instrument": ("choice", INSTRUMENTS, True),
+                 "size_cr": ("number", None, True), "fee_agreed_rs": ("number", None, True),
+                 "mandate_ref": ("text", None, True)},
+    "Lost": {"lost_reason": ("choice", LOST_REASONS, True), "lost_to": ("choice", AGENCIES, False),
+             "note": ("text", None, True)},
+}
+
+
+def validate_stage(stage: str, details: dict | None) -> dict:
+    """The cleaned details for a move to `stage`, or ValueError naming every
+    missing or invalid field - so the form can say exactly what to fill."""
+    from datetime import date as _date
+    spec = STAGE_FIELDS.get(stage)
+    if spec is None:
+        raise ValueError(f"unknown stage {stage!r}; expected one of {STAGES}")
+    details = details or {}
+    clean, problems = {}, []
+    for field, (kind, allowed, required) in spec.items():
+        v = details.get(field)
+        v = v.strip() if isinstance(v, str) else v
+        if v in (None, ""):
+            if required:
+                problems.append(f"{field} is required")
+            continue
+        if kind == "choice" and v not in allowed:
+            problems.append(f"{field} must be one of {allowed}")
+        elif kind == "date":
+            try:
+                v = _date.fromisoformat(str(v)[:10]).isoformat()
+            except ValueError:
+                problems.append(f"{field} must be a date (YYYY-MM-DD)")
+        elif kind == "number":
+            try:
+                v = float(v)
+                if v <= 0:
+                    raise ValueError
+            except (TypeError, ValueError):
+                problems.append(f"{field} must be a positive number")
+        elif kind == "text":
+            v = str(v)[:300]
+        clean[field] = v
+    if stage == "Lost" and clean.get("lost_reason") == "Lost to another CRA" and not clean.get("lost_to"):
+        problems.append("lost_to is required when lost_reason is 'Lost to another CRA'")
+    if problems:
+        raise ValueError(f"{stage} needs: " + "; ".join(problems))
+    return clean
+
+
+def _detail_text(old: str, new: str, clean: dict) -> str:
+    extra = ", ".join(f"{k}={v}" for k, v in clean.items())
+    return f"{old} -> {new}" + (f" | {extra}" if extra else "")
+
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS saved_leads (
     company_name TEXT PRIMARY KEY,
@@ -112,7 +188,7 @@ def _migrate(con: sqlite3.Connection) -> None:
     backfill `norm` for rows already in it. Without the backfill every old row
     would be invisible to the de-duplication lookup and duplicate on next save."""
     cols = {r[1] for r in con.execute("PRAGMA table_info(saved_leads)")}
-    for col in ("cin", "norm", "owner"):
+    for col in ("cin", "norm", "owner", "origin", "stage_details", "next_followup_date"):
         if col not in cols:
             con.execute(f"ALTER TABLE saved_leads ADD COLUMN {col} TEXT")
     for name, in con.execute(
@@ -140,6 +216,7 @@ def _decode(row: sqlite3.Row) -> dict:
     d.pop("norm", None)   # internal identity key, not something a caller renders
     d["flags"] = json.loads(d.get("flags") or "{}")
     d["agencies"] = json.loads(d.get("agencies") or "[]")
+    d["stage_details"] = json.loads(d.get("stage_details") or "{}")
     return d
 
 
@@ -183,35 +260,41 @@ def _local_save_lead(lead: dict) -> dict:
         now = _now()
         flags = lead.get("flags") or {}
         con.execute(
-            "INSERT INTO saved_leads (company_name, cin, norm, owner, stage, winnability,"
+            "INSERT INTO saved_leads (company_name, cin, norm, owner, origin, stage, winnability,"
             " flags, agencies, notes, saved_at, updated_at)"
-            " VALUES (?,?,?,?,?,?,?,?,?,?,?)",
-            (name, cin or None, norm_name(name), (lead.get("owner") or "")[:40], "Identified",
+            " VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+            (name, cin or None, norm_name(name), (lead.get("owner") or "")[:40],
+             lead.get("origin") or "list", "Identified",
              lead.get("winnability"), json.dumps(flags),
-             json.dumps(lead.get("agencies_seen") or []), "", now, now))
+             json.dumps(lead.get("agencies_seen") or []), lead.get("reason") or "", now, now))
         _event(con, name, "saved", "added from queue",
                lead.get("winnability"), flags)
     return {"company_name": name, "cin": cin or None, "stage": "Identified",
             "already_saved": False, "matched_on": ""}
 
 
-def _local_set_stage(company_name: str, stage: str, note: str = "") -> dict:
+def _local_set_stage(company_name: str, stage: str, note: str = "",
+                     details: dict | None = None) -> dict:
     """Move a lead along the pipeline. Unknown stages are refused rather than
-    written, or the funnel silently grows categories nobody can report on."""
-    if stage not in STAGES:
-        raise ValueError(f"unknown stage {stage!r}; expected one of {STAGES}")
+    written, or the funnel silently grows categories nobody can report on;
+    and each stage's mandatory fields are refused if missing (spec 3)."""
+    clean = validate_stage(stage, details)
 
     with _connect() as con:
         row, _ = _find(con, company_name)
         if row is None:
             raise KeyError(company_name)
         company_name = row["company_name"]
+        sd = json.loads(row["stage_details"] or "{}") if "stage_details" in row.keys() else {}
+        sd[stage] = clean
         con.execute(
-            "UPDATE saved_leads SET stage = ?, updated_at = ?,"
+            "UPDATE saved_leads SET stage = ?, updated_at = ?, stage_details = ?,"
+            " next_followup_date = ?,"
             " notes = CASE WHEN ? = '' THEN notes ELSE ? END"
             " WHERE company_name = ?",
-            (stage, _now(), note, note, company_name))
-        _event(con, company_name, "stage", f"{row['stage']} -> {stage}",
+            (stage, _now(), json.dumps(sd), clean.get("next_followup_date"),
+             note, note, company_name))
+        _event(con, company_name, "stage", _detail_text(row["stage"], stage, clean),
                row["winnability"], json.loads(row["flags"] or "{}"))
     return {"company_name": company_name, "stage": stage}
 
@@ -382,7 +465,10 @@ def _remote_save(c, lead: dict) -> dict:
            "saved_at": now, "updated_at": now}
     # Optional columns that arrive with a schema update; a database that has
     # not had it yet still takes the save without them.
-    optional = {k: v for k, v in (("cin", cin), ("owner", (lead.get("owner") or "")[:40])) if v}
+    optional = {k: v for k, v in (("cin", cin), ("owner", (lead.get("owner") or "")[:40]),
+                                  ("origin", lead.get("origin") or "")) if v}
+    if lead.get("reason"):
+        row["notes"] = lead["reason"][:500]
     try:
         c.table("saved_leads").insert(row | optional).execute()
     except Exception as e:
@@ -405,13 +491,16 @@ def _remote_save(c, lead: dict) -> dict:
             "already_saved": False, "matched_on": ""}
 
 
-def _remote_set_stage(c, company_name: str, stage: str, note: str) -> dict:
-    if stage not in STAGES:
-        raise ValueError(f"unknown stage {stage!r}; expected one of {STAGES}")
+def _remote_set_stage(c, company_name: str, stage: str, note: str,
+                      details: dict | None = None) -> dict:
+    clean = validate_stage(stage, details)
     row, _ = _match(_remote_rows(c), company_name)
     if row is None:
         raise KeyError(company_name)
-    patch = {"stage": stage, "updated_at": _now()}
+    sd = dict(row.get("stage_details") or {})
+    sd[stage] = clean
+    patch = {"stage": stage, "updated_at": _now(), "stage_details": sd,
+             "next_followup_date": clean.get("next_followup_date")}
     if note:
         patch["notes"] = note
     # Compare-and-set on the old stage: two tabs moving the same lead must not
@@ -461,10 +550,10 @@ def save_lead(lead: dict, token: str | None = None) -> dict:
 
 
 def set_stage(company_name: str, stage: str, note: str = "",
-              token: str | None = None) -> dict:
+              token: str | None = None, details: dict | None = None) -> dict:
     return _dispatch("set_stage", token,
-                     lambda c: _remote_set_stage(c, company_name, stage, note),
-                     lambda: _local_set_stage(company_name, stage, note))
+                     lambda c: _remote_set_stage(c, company_name, stage, note, details),
+                     lambda: _local_set_stage(company_name, stage, note, details))
 
 
 def remove_lead(company_name: str, token: str | None = None) -> bool:
@@ -517,6 +606,116 @@ def list_all_leads(token: str | None = None, owner: str = "") -> list[dict]:
     return narrow(out)
 
 
+_CIN_RE = __import__("re").compile(r"^[LU]\d{5}[A-Z]{2}\d{4}[A-Z]{3}\d{6}$")
+
+
+def validate_self_sourced(lead: dict) -> None:
+    """Spec 3: a BD's own lead still needs a real CIN and a one-sentence reason,
+    so it is as answerable later as a list name."""
+    cin = (lead.get("cin") or "").strip().upper()
+    if not _CIN_RE.match(cin):
+        raise ValueError("a self-sourced lead needs a valid 21-character CIN")
+    if len((lead.get("reason") or "").strip()) < 15:
+        raise ValueError("a self-sourced lead needs a one-sentence reason")
+
+
+def reassign(company_name: str, new_owner: str, reason: str, token: str | None,
+             valid_owners: set[str]) -> dict:
+    """Admin only (spec 4): move a lead to another BD, with a reason, logged.
+    The history moves with the name because it is the same row."""
+    if new_owner not in valid_owners:
+        raise ValueError(f"unknown BD {new_owner!r}")
+    if len((reason or "").strip()) < 5:
+        raise ValueError("a reassignment needs a reason")
+    if not per_user():
+        with _connect() as con:
+            row, _ = _find(con, company_name)
+            if row is None:
+                raise KeyError(company_name)
+            con.execute("UPDATE saved_leads SET owner = ?, updated_at = ? WHERE company_name = ?",
+                        (new_owner, _now(), row["company_name"]))
+            _event(con, row["company_name"], "reassigned",
+                   f"{row['owner'] or 'unassigned'} -> {new_owner}: {reason.strip()[:300]}")
+        return {"company_name": row["company_name"], "owner": new_owner}
+    list_all_leads(token)                      # a valid session, or AuthRequired
+    ok, rows = database.remote("pipeline reassign read", lambda sc: database.select_all(
+        sc, "saved_leads", "company_name,user_id,owner", ("user_id", "company_name")))
+    if not ok:
+        raise StoreUnavailable("reassigning needs SUPABASE_SERVICE_KEY on the server")
+    row, _ = _match(rows or [], company_name)
+    if row is None:
+        raise KeyError(company_name)
+
+    def write(sc):
+        sc.table("saved_leads").update({"owner": new_owner, "updated_at": _now()}).eq(
+            "user_id", row["user_id"]).eq("company_name", row["company_name"]).execute()
+        # The trigger logs the owner change; the reason is its own row.
+        sc.table("lead_events").insert({
+            "company_name": row["company_name"], "user_id": row["user_id"],
+            "event": "note", "detail": f"reassigned to {new_owner}: {reason.strip()[:300]}"}).execute()
+    ok, _ = database.remote("pipeline reassign", write)
+    if not ok:
+        raise StoreUnavailable("reassign failed")
+    return {"company_name": row["company_name"], "owner": new_owner}
+
+
+def team_summary(leads: list[dict], list_rows: list[dict], bds: list[dict],
+                 today: str | None = None) -> dict:
+    """The Admin screen (spec 4), per BD. Pure: leads = every BD's saved rows
+    (with owner, stage, stage_details, next_followup_date, origin); list_rows =
+    this month's BD-list rows."""
+    from datetime import date as _date
+    today = today or _date.today().isoformat()
+    rank = {s: i for i, s in enumerate(STAGES)}
+    out = {}
+    for b in bds:
+        mine = [l for l in leads if (l.get("owner") or "") == b["id"]]
+        assigned = [r for r in list_rows if r.get("bd_id") == b["id"] and not r.get("in_progress")]
+        worked = {norm_name(l["company_name"]) for l in mine
+                  if l.get("stage") != "Identified" and l.get("origin") != "self_sourced"}
+        touched = sum(1 for r in assigned if r["key"] in worked)
+        reached = lambda st: sum(1 for l in mine  # noqa: E731
+                                 if rank.get(l.get("stage"), -1) >= rank[st] and l.get("stage") != "Lost"
+                                 or st in (l.get("stage_details") or {}))
+        sd = lambda l, st: (l.get("stage_details") or {}).get(st, {})  # noqa: E731
+        overdue = []
+        for l in mine:
+            due = l.get("next_followup_date")
+            if due and due < today and l.get("stage") not in ("Mandated", "Lost"):
+                days = (_date.fromisoformat(today) - _date.fromisoformat(str(due)[:10])).days
+                overdue.append({"company_name": l["company_name"], "stage": l["stage"],
+                                "due": str(due)[:10], "days_late": days})
+        lost = {}
+        for l in mine:
+            if l.get("stage") == "Lost":
+                r = sd(l, "Lost").get("lost_reason", "not recorded")
+                lost[r] = lost.get(r, 0) + 1
+        contacted, proposal, mandated = reached("Contacted"), reached("Proposal"), reached("Mandated")
+        out[b["id"]] = {
+            "name": b["name"],
+            "assigned": len(assigned), "touched": touched,
+            "coverage_pct": round(100 * touched / len(assigned)) if assigned else None,
+            "stages": {s: sum(1 for l in mine if l.get("stage") == s) for s in STAGES},
+            "conv_contacted_to_proposal": round(100 * proposal / contacted) if contacted else None,
+            "conv_proposal_to_mandated": round(100 * mandated / proposal) if proposal else None,
+            "proposal_cr": sum(float(sd(l, "Proposal").get("size_cr", 0)) for l in mine if l.get("stage") == "Proposal"),
+            "proposal_fees_rs": sum(float(sd(l, "Proposal").get("fee_quoted_rs", 0)) for l in mine if l.get("stage") == "Proposal"),
+            "mandated_cr": sum(float(sd(l, "Mandated").get("size_cr", 0)) for l in mine if l.get("stage") == "Mandated"),
+            "mandated_fees_rs": sum(float(sd(l, "Mandated").get("fee_agreed_rs", 0)) for l in mine if l.get("stage") == "Mandated"),
+            "overdue": sorted(overdue, key=lambda o: -o["days_late"]),
+            "lost_reasons": lost,
+            "self_sourced": sum(1 for l in mine if l.get("origin") == "self_sourced"),
+        }
+    # Clash: the same company (or CIN) in two BDs' pipelines.
+    seen: dict[str, set] = {}
+    for l in leads:
+        for k in filter(None, (norm_name(l["company_name"]), (l.get("cin") or "").upper())):
+            seen.setdefault(k, set()).add(l.get("owner") or "unassigned")
+    clashes = sorted({k for k, owners in seen.items() if len(owners) > 1})
+    unowned = sum(1 for l in leads if not l.get("owner"))
+    return {"bds": out, "clashes": clashes, "unassigned_leads": unowned}
+
+
 def saved_names(token: str | None = None) -> set[str]:
     return _dispatch("names", token,
                      lambda c: {r["company_name"] for r in _remote_rows(c)},
@@ -540,6 +739,17 @@ def events(company_name: str | None = None, limit: int = 200,
 
 
 # -- self-check (temp DB, no network) ----------------------------------------
+
+# Complete, valid stage details for the self-checks (spec 3 makes them mandatory).
+EXAMPLE_DETAILS = {
+    "Contacted": {"contact_name": "CFO", "designation": "CFO", "channel": "Call",
+                  "contact_date": "2026-09-28", "next_followup_date": "2026-10-05"},
+    "Proposal": {"proposal_date": "2026-09-28", "instrument": "NCD", "size_cr": 200,
+                 "fee_quoted_rs": 450000, "competing_agency": "Unknown",
+                 "next_followup_date": "2026-10-05"},
+    "Lost": {"lost_reason": "Price", "note": "went with incumbent on price"},
+}
+
 
 class _FakePostgrest:
     """In-memory stand-in for one user's PostgREST client, for the self-check
@@ -630,7 +840,8 @@ def _demo_remote() -> None:
         assert first["already_saved"] is False
         dup = save_lead({"company_name": "Berar Finance Ltd"}, token=t)
         assert dup["already_saved"] and dup["matched_on"] == "name", dup
-        assert set_stage("Berar Finance Ltd", "Contacted", "called CFO", token=t)["stage"] == "Contacted"
+        assert set_stage("Berar Finance Ltd", "Contacted", "called CFO", token=t,
+                         details=EXAMPLE_DETAILS["Contacted"])["stage"] == "Contacted"
         assert funnel(token=t)["Contacted"] == 1
         assert list_leads(token=t)[0]["notes"] == "called CFO"
         assert saved_names(token=t) == {"Berar Finance Limited"}
@@ -674,7 +885,7 @@ def _demo() -> None:
             assert first["already_saved"] is False and first["stage"] == "Identified"
 
             # Saving twice must not reset progress.
-            set_stage("Berar Finance Limited", "Proposal")
+            set_stage("Berar Finance Limited", "Proposal", details=EXAMPLE_DETAILS["Proposal"])
             again = save_lead(lead)
             assert again["already_saved"] is True and again["stage"] == "Proposal", again
             # Same shape as list_leads(), not raw JSON strings.
@@ -688,6 +899,32 @@ def _demo() -> None:
             assert got["flags"]["inc_tagged"] is True
             assert got["agencies"] == ["CARE", "INDRA"]
 
+            # Spec 3: a move without its mandatory fields is refused, naming them.
+            try:
+                set_stage("Berar Finance Limited", "Contacted", details={"contact_name": "X"})
+                raise AssertionError("missing mandatory fields should be refused")
+            except ValueError as e:
+                assert "designation is required" in str(e) and "next_followup_date" in str(e), e
+            try:
+                set_stage("Berar Finance Limited", "Lost",
+                          details={"lost_reason": "Lost to another CRA", "note": "x"})
+                raise AssertionError("lost_to should be required")
+            except ValueError as e:
+                assert "lost_to" in str(e)
+            assert list_leads()[0]["stage_details"]["Proposal"]["size_cr"] == 200.0
+            assert list_leads()[0]["next_followup_date"] == "2026-10-05"
+
+            # Admin reassign (SQLite path) is logged with its reason.
+            reassign("Berar Finance Limited", "hema", "Avinash on leave", None, {"hema", "udit"})
+            assert list_leads()[0]["owner"] == "hema"
+            assert any(e["event"] == "reassigned" and "on leave" in e["detail"]
+                       for e in events("Berar Finance Limited"))
+            try:
+                reassign("Berar Finance Limited", "nobody", "reason here", None, {"hema"})
+                raise AssertionError("unknown BD should be refused")
+            except ValueError:
+                pass
+
             # An unknown stage is refused, not written.
             try:
                 set_stage("Berar Finance Limited", "Nearly")
@@ -696,7 +933,7 @@ def _demo() -> None:
                 pass
 
             try:
-                set_stage("Nobody Ltd", "Contacted")
+                set_stage("Nobody Ltd", "Contacted", details=EXAMPLE_DETAILS["Contacted"])
                 raise AssertionError("unknown company should have raised")
             except KeyError:
                 pass
@@ -706,7 +943,7 @@ def _demo() -> None:
             assert remove_lead("Berar Finance Limited") is False
             assert list_leads() == []
             hist = [e["event"] for e in events("Berar Finance Limited")]
-            assert hist == ["removed", "stage", "saved"], hist
+            assert hist == ["removed", "reassigned", "stage", "saved"], hist
 
             # De-duplication: same company, two spellings, one row.
             save_lead({"company_name": "Nova Capital Private Limited",
@@ -724,7 +961,7 @@ def _demo() -> None:
             orbit = [l for l in list_leads() if l["company_name"] == "Orbit Finserv Ltd"]
             assert len(orbit) == 1 and orbit[0]["cin"] == "U12345MH2010PLC000001", orbit
             # And a name variant still moves the row it matched.
-            set_stage("Nova Capital Pvt Ltd", "Contacted")
+            set_stage("Nova Capital Pvt Ltd", "Contacted", details=EXAMPLE_DETAILS["Contacted"])
             assert [l for l in list_leads()
                     if l["company_name"] == "Nova Capital Private Limited"][0]["stage"] == "Contacted"
             assert remove_lead("Nova Capital Pvt Ltd") is True

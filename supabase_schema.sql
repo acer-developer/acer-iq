@@ -52,6 +52,14 @@ alter table public.saved_leads add column if not exists cin text;
 -- akash, udit - backend/data/bd_roster.json). Admin sees every owner.
 alter table public.saved_leads add column if not exists owner text default '';
 
+-- Added 2026-09-29 (BD_LIST_SPEC.md section 3): what the BD recorded at each
+-- stage move (mandatory fields, validated server-side), the date of the next
+-- follow-up (drives the overdue list), and where the name came from
+-- ('list' = the monthly BD list, 'self_sourced' = the BD's own lead).
+alter table public.saved_leads add column if not exists stage_details jsonb default '{}'::jsonb;
+alter table public.saved_leads add column if not exists next_followup_date date;
+alter table public.saved_leads add column if not exists origin text default 'list';
+
 
 -- ---------------------------------------------------------------------------
 -- lead_events: the outcome log
@@ -252,7 +260,14 @@ begin
     elsif tg_op = 'UPDATE' then
         if new.stage is distinct from old.stage then
             insert into public.lead_events (company_name, user_id, event, detail, winnability, flags)
-            values (new.company_name, new.user_id, 'stage', old.stage || ' -> ' || new.stage,
+            values (new.company_name, new.user_id, 'stage',
+                    old.stage || ' -> ' || new.stage
+                        || coalesce(' | ' || (new.stage_details -> new.stage)::text, ''),
+                    new.winnability, new.flags);
+        elsif new.owner is distinct from old.owner then
+            insert into public.lead_events (company_name, user_id, event, detail, winnability, flags)
+            values (new.company_name, new.user_id, 'reassigned',
+                    coalesce(old.owner, '') || ' -> ' || coalesce(new.owner, ''),
                     new.winnability, new.flags);
         elsif new.notes is distinct from old.notes then
             insert into public.lead_events (company_name, user_id, event, detail, winnability, flags)

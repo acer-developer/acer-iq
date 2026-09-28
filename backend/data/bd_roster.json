@@ -1,6 +1,11 @@
 [
-  {"id": "avinash", "name": "Avinash", "email": ""},
-  {"id": "hema",    "name": "Hema",    "email": ""},
-  {"id": "akash",   "name": "Akash",   "email": ""},
-  {"id": "udit",    "name": "Udit",    "email": ""}
+  {"id": "hema",    "name": "Hema",    "email": "",
+   "segment": "NBFC / HFC / MFI (incl. securitisation)", "sectors": ["nbfc"]},
+  {"id": "avinash", "name": "Avinash", "email": "",
+   "segment": "Manufacturing & large corporates",
+   "sectors": ["metals", "auto", "pharma", "chemicals", "textiles", "cement", "oil_gas", "agri", "logistics"]},
+  {"id": "akash",   "name": "Akash",   "email": "",
+   "segment": "Infra, real estate, power & EPC", "sectors": ["infra", "real_estate", "power"]},
+  {"id": "udit",    "name": "Udit",    "email": "",
+   "segment": "SME & bank loan ratings, first-time issuers", "sectors": ["sme"]}
 ]

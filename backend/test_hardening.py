@@ -443,7 +443,7 @@ def test_saving_the_same_lead_twice_does_not_reset_its_stage():
     ps, cleanup = _temp_store()
     try:
         ps.save_lead({"company_name": "Acme Ltd", "winnability": 50, "flags": {}})
-        ps.set_stage("Acme Ltd", "Proposal")
+        ps.set_stage("Acme Ltd", "Proposal", details=ps.EXAMPLE_DETAILS["Proposal"])
         again = ps.save_lead({"company_name": "Acme Ltd"})
         assert again["already_saved"] is True
         assert again["stage"] == "Proposal", again
@@ -472,7 +472,7 @@ def test_outcome_history_survives_removing_a_lead():
     ps, cleanup = _temp_store()
     try:
         ps.save_lead({"company_name": "Acme Ltd", "flags": {"inc_tagged": True}})
-        ps.set_stage("Acme Ltd", "Lost")
+        ps.set_stage("Acme Ltd", "Lost", details=ps.EXAMPLE_DETAILS["Lost"])
         assert ps.remove_lead("Acme Ltd") is True
         assert ps.list_leads() == []
         events = [e["event"] for e in ps.events("Acme Ltd")]
@@ -704,7 +704,8 @@ def test_bd_list_is_frozen_and_every_row_is_explained():
         assert calls["n"] == 1, "a frozen list was recomputed"
         assert again["rows"] == first["rows"] and again["frozen"]
         row = first["rows"][0]
-        assert row["bd_name"] == "Avinash" and row["instrument"] == "NCD / bond rating", row
+        assert row["bd_name"] == "Hema" and row["instrument"] == "NCD", row
+        assert row["cin"] and row["urgency"] and row["contact_route"], row
         assert row["reason"] and row["play"] and row["sources"][0]["read_at"], row
         assert first["inputs"]["refinance"]["status"] == "unreachable"
         forced = asyncio.run(bd_list.get_or_generate(force=True))
@@ -730,6 +731,43 @@ def test_team_pipeline_view_needs_a_session():
             assert e.status_code == 401
     finally:
         ps.per_user = real
+
+
+def test_team_summary_for_the_head_of_bd():
+    """BD_LIST_SPEC.md 4: per-BD coverage, funnel, revenue, overdue list and
+    clashes, computed from the leads alone."""
+    from backend.pipeline import pipeline_store as ps
+    bds = [{"id": "hema", "name": "Hema"}, {"id": "udit", "name": "Udit"}]
+    rows = [{"key": ps.norm_name("Acme Finance Ltd"), "bd_id": "hema"},
+            {"key": ps.norm_name("Beta Finance Ltd"), "bd_id": "hema"}]
+    leads = [
+        {"company_name": "Acme Finance Ltd", "owner": "hema", "stage": "Proposal",
+         "origin": "list", "next_followup_date": "2026-09-20",
+         "stage_details": {"Contacted": {}, "Proposal": {"size_cr": 200, "fee_quoted_rs": 450000}}},
+        {"company_name": "Gamma Ltd", "owner": "hema", "stage": "Lost", "origin": "self_sourced",
+         "stage_details": {"Lost": {"lost_reason": "Price"}}},
+        {"company_name": "Acme Finance Limited", "owner": "udit", "stage": "Identified"},
+    ]
+    t = ps.team_summary(leads, rows, bds, today="2026-09-28")
+    h = t["bds"]["hema"]
+    assert h["assigned"] == 2 and h["touched"] == 1 and h["coverage_pct"] == 50, h
+    assert h["proposal_cr"] == 200 and h["proposal_fees_rs"] == 450000, h
+    assert h["overdue"][0]["days_late"] == 8, h["overdue"]
+    assert h["lost_reasons"] == {"Price": 1} and h["self_sourced"] == 1, h
+    assert ps.norm_name("Acme Finance Ltd") in t["clashes"], t["clashes"]
+
+
+def test_self_sourced_lead_needs_cin_and_reason():
+    from backend.pipeline import pipeline_store as ps
+    for bad in ({"cin": "", "reason": "their NCD matures in March"},
+                {"cin": "U65999MH2001PLC123456", "reason": "hot"}):
+        try:
+            ps.validate_self_sourced(bad)
+            raise AssertionError(f"accepted {bad}")
+        except ValueError:
+            pass
+    ps.validate_self_sourced({"cin": "U65999MH2001PLC123456",
+                              "reason": "Raising a Rs 300 cr NCD next quarter per their CFO"})
 
 
 def test_per_user_pipeline_refuses_an_anonymous_caller():

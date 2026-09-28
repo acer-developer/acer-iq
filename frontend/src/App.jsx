@@ -13,8 +13,11 @@ import SourceHealth from "./components/SourceHealth.jsx";
 import LoginPage from "./components/LoginPage.jsx";
 import { apiUrl } from "./lib/api.js";
 import { authConfigured, supabase } from "./lib/auth.js";
+import { ADMIN, DEFAULT_BDS, ProfileContext, loadProfileId, saveProfileId } from "./lib/profile.js";
+import BDListPage from "./components/BDListPage.jsx";
 
 const TAB_INFO = {
+  bdlist: "This month's call list for Avinash, Hema, Akash and Udit. Generated once at the start of the month from the queue, Macro and major company news, then frozen - so the list does not shuffle under anyone, and 'why was I given this name' is answerable later. Every name shows the instrument to pitch, the play, the reason and its sources. Admin sees all four lists; a BD profile sees only their own.",
   macro: "A big thing happened - who does it hit, and do they now need a rating? Takes the major macro events from the news archive (RBI and yields, crude, the rupee, sector regulation), tags the sectors they hit, and names the companies in those sectors with listed debt maturing inside 9 months or interest coverage too thin to absorb the shock, ranked by winnability. A join over data ACER-IQ already has, not a model: every name says why it is there and links to its sources.",
   queue: "One ranked list, highest winnability first. Winnability is not need - every CRA sees the same downgrade at the same hour. It asks whether ACER can realistically win the mandate: first-time borrowers, issuers tagged Issuer Not Cooperating, self-withdrawn ratings, and proven multi-CRA shoppers. A credit screen sits on top and can block a lead outright - that is different from a lead simply being low winnability.",
   radar: "Monitors public signals that indicate a company needs a credit rating soon: NCD/bond board approvals, rating withdrawals, surveillance renewals, and bank loan rating expirations. Signals come from BSE/NSE exchange filings and CRA press releases.",
@@ -74,6 +77,12 @@ function TabBar({ active, onChange }) {
           d="M12 21a9 9 0 100-18 9 9 0 000 18zm0 0c2.5-2.5 3.75-5.5 3.75-9S14.5 5.5 12 3m0 18c-2.5-2.5-3.75-5.5-3.75-9S9.5 5.5 12 3M3.5 9h17M3.5 15h17" />
       </svg>
     ), label: "Macro" },
+    { id: "bdlist", icon: (
+      <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+        <path strokeLinecap="round" strokeLinejoin="round"
+          d="M15 19.128a9.38 9.38 0 002.625.372 9.337 9.337 0 004.121-.952 4.125 4.125 0 00-7.533-2.493M15 19.128v-.003c0-1.113-.285-2.16-.786-3.07M15 19.128v.106A12.318 12.318 0 018.624 21c-2.331 0-4.512-.645-6.374-1.766l-.001-.109a6.375 6.375 0 0111.964-3.07M12 6.375a3.375 3.375 0 11-6.75 0 3.375 3.375 0 016.75 0zm8.25 2.25a2.625 2.625 0 11-5.25 0 2.625 2.625 0 015.25 0z" />
+      </svg>
+    ), label: "BD List" },
     { id: "radar", icon: (
       <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
         <path strokeLinecap="round" strokeLinejoin="round"
@@ -154,8 +163,33 @@ export default function App() {
   return <Workspace session={session} />;
 }
 
+function ProfileSwitcher({ profileId, setProfileId, bds }) {
+  return (
+    <label className="flex items-center gap-1.5 text-xs text-gray-500">
+      View as
+      <select
+        value={profileId}
+        onChange={(e) => { setProfileId(e.target.value); saveProfileId(e.target.value); }}
+        className="rounded-md border border-gray-200 bg-white px-2 py-1 text-xs font-semibold text-gray-800 focus:border-blue-500 focus:outline-none"
+      >
+        <option value={ADMIN.id}>Admin (everything)</option>
+        {bds.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+      </select>
+    </label>
+  );
+}
+
 function Workspace({ session }) {
   const [activeTab, setActiveTab] = useState("queue");
+  const [bds, setBds] = useState(DEFAULT_BDS);
+  const [profileId, setProfileId] = useState(loadProfileId);
+  React.useEffect(() => {
+    fetch(apiUrl("/api/roster")).then((r) => (r.ok ? r.json() : null))
+      .then((d) => { if (d?.bds?.length) setBds(d.bds); }).catch(() => {});
+  }, []);
+  const bd = bds.find((b) => b.id === profileId);
+  const profile = bd ?? ADMIN;
+  const profileValue = { profile, bds, isAdmin: !bd };
 
   // Find Leads (directory) state
   const [companies, setCompanies] = useState([]);
@@ -251,6 +285,7 @@ function Workspace({ session }) {
   const searchDesc = [searchLocation, searchEntity, searchInstrument].filter(Boolean).join(" / ");
 
   return (
+    <ProfileContext.Provider value={profileValue}>
     <div className="flex h-screen flex-col bg-gray-50 overflow-hidden">
 
       {/* Brand bar */}
@@ -266,6 +301,7 @@ function Workspace({ session }) {
             <span className="text-sm font-bold text-gray-900">ACER-IQ</span>
           </div>
           <div className="ml-auto flex items-center gap-3">
+            <ProfileSwitcher profileId={profile.id} setProfileId={setProfileId} bds={bds} />
             {authConfigured ? (
               <>
                 <span className="text-xs text-gray-500">{session?.user?.email}</span>
@@ -378,11 +414,17 @@ function Workspace({ session }) {
         </>
       )}
 
+      {/* Monthly BD list (Tab 2) */}
+      {activeTab === "bdlist" && (
+        <BDListPage />
+      )}
+
       {/* My Pipeline (live) */}
       {activeTab === "pipeline" && (
         <PipelinePage />
       )}
 
     </div>
+    </ProfileContext.Provider>
   );
 }

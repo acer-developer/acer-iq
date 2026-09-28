@@ -146,7 +146,7 @@ def join(events: list[dict], refinance_rows: list[dict], coverage_rows: list[dic
                 "type": "refinance",
                 "text": f"debt maturing {r['maturity_label']} ({n} listed instrument{'s' if n != 1 else ''})",
                 "source": "BSE active debt scrip master", "url": r.get("source_url", ""),
-                "read_at": r.get("read_at", "")})
+                "read_at": r.get("read_at", ""), "maturity_latest": r.get("maturity_latest", "")})
     for r in coverage_rows:
         ic = r.get("interest_coverage")
         if ic is None or r.get("is_bank"):
@@ -249,6 +249,7 @@ async def _refinance_rows() -> tuple[list[dict], str]:
                .isoformat(timespec="seconds") if bse_scraper._master_at else "")
     rows = [{"issuer_name": c["issuer_name"], "maturity_label": c["maturity_label"],
              "instrument_count": c["instrument_count"],
+             "maturity_latest": c.get("maturity_latest", ""),
              "source_url": bse_scraper.BSE_SCRIP_MASTER, "read_at": read_at}
             for c in data.get("candidates", [])]
     return rows, data.get("data_status", "unverified")
