@@ -49,7 +49,10 @@ LOST_REASONS = ["Price", "Turnaround time", "Lost to another CRA", "Existing age
                 "Credit concern (ACER declined)", "No response after 3 attempts", "Not a fit"]
 
 # field -> (kind, allowed values or None, required)
-STAGE_FIELDS: dict[str, dict[str, tuple]] = {
+# ponytail: the detailed per-stage table below is kept for reference but
+# replaced by SIMPLE_FIELDS (operator: statuses, not stages). Nothing reads
+# it any more except validation of any detail a caller still sends.
+DETAILED_STAGE_FIELDS: dict[str, dict[str, tuple]] = {
     "Identified": {},
     "Contacted": {"contact_name": ("text", None, True), "designation": ("text", None, True),
                   "channel": ("choice", CHANNELS, True), "contact_date": ("date", None, True),
@@ -82,6 +85,25 @@ SIMPLE_STATUS = {"Pending": "Identified", "In progress": "Contacted",
                  "Won": "Mandated", "Lost": "Lost"}
 
 
+SIMPLE_LOST_REASONS = ["Price", "TAT", "Went to other agency", "Issuer deferred", "No response"]
+# Staleness replaces follow-up dates (Head of BD, 2026-09-29): no field to fill,
+# nothing to game with a future date.
+STALE_DAYS = {"Pending": 7, "In progress": 14}
+
+
+def stale_days(status: str, last_updated: str, today: str) -> int | None:
+    """Days past the staleness line, or None if not stale."""
+    from datetime import date as _date
+    limit = STALE_DAYS.get(status)
+    if not limit or not last_updated:
+        return None
+    try:
+        age = (_date.fromisoformat(today) - _date.fromisoformat(str(last_updated)[:10])).days
+    except ValueError:
+        return None
+    return age - limit if age > limit else None
+
+
 def simple_status(stage: str) -> str:
     """Stored stage -> what a BD sees."""
     if stage == "Identified":
@@ -91,6 +113,14 @@ def simple_status(stage: str) -> str:
     if stage == "Lost":
         return "Lost"
     return "In progress"
+
+
+_NOTE = ("text", None, False)
+_BY = ("text", None, False)
+STAGE_FIELDS: dict[str, dict[str, tuple]] = {
+    st: {"note": _NOTE, "changed_by": _BY} for st in STAGES}
+STAGE_FIELDS["Lost"] = {"lost_reason": ("choice", SIMPLE_LOST_REASONS, False),
+                        "note": _NOTE, "changed_by": _BY}
 
 
 def validate_stage(stage: str, details: dict | None) -> dict:
@@ -242,6 +272,7 @@ def _decode(row: sqlite3.Row) -> dict:
     d["flags"] = json.loads(d.get("flags") or "{}")
     d["agencies"] = json.loads(d.get("agencies") or "[]")
     d["stage_details"] = json.loads(d.get("stage_details") or "{}")
+    d["status"] = simple_status(d.get("stage", ""))
     return d
 
 
@@ -484,6 +515,7 @@ def _remote_decode(r: dict, me: str = "") -> dict:
     # own, so the UI shows another BD's lead read-only instead of failing.
     d["mine"] = (r.get("user_id") == me) if me else True
     d.setdefault("owner", "")
+    d["status"] = simple_status(d.get("stage", ""))
     d["flags"] = d.get("flags") or {}
     d["agencies"] = d.get("agencies") or []
     d.setdefault("cin", None)
@@ -812,6 +844,19 @@ def team_summary(leads: list[dict], list_rows: list[dict], bds: list[dict],
             "lost_reasons": lost,
             "self_sourced": sum(1 for l in mine if l.get("origin") == "self_sourced"),
         }
+        # The Head of BD's view under the status model (2026-09-29).
+        st_counts = {"Pending": 0, "In progress": 0, "Won": 0, "Lost": 0}
+        stale = []
+        for l in mine:
+            st = simple_status(l.get("stage", ""))
+            st_counts[st] += 1
+            late = stale_days(st, l.get("updated_at") or "", today)
+            if late is not None:
+                stale.append({"company_name": l["company_name"], "status": st, "days_over": late})
+        out[b["id"]].update(
+            status_counts=st_counts, won=st_counts["Won"],
+            touched_pct=out[b["id"]]["coverage_pct"],
+            stale=sorted(stale, key=lambda x: -x["days_over"]))
     # Clash: the same company (or CIN) in two BDs' pipelines.
     seen: dict[str, set] = {}
     for l in leads:
@@ -854,6 +899,7 @@ EXAMPLE_DETAILS = {
                  "fee_quoted_rs": 450000, "competing_agency": "Unknown",
                  "next_followup_date": "2026-10-05"},
     "Lost": {"lost_reason": "Price", "note": "went with incumbent on price"},
+    "Won": {"note": "mandate signed"},
 }
 
 
@@ -1009,33 +1055,16 @@ def _demo() -> None:
             # but a malformed value is still refused.
             set_stage("Berar Finance Limited", "Contacted")
             try:
-                set_stage("Berar Finance Limited", "Contacted", details={"channel": "Pigeon"})
-                raise AssertionError("an off-list channel should be refused")
+                set_stage("Berar Finance Limited", "Lost", details={"lost_reason": "Bad luck"})
+                raise AssertionError("an off-list lost reason should be refused")
             except ValueError:
                 pass
-            set_stage("Berar Finance Limited", "Proposal", details=EXAMPLE_DETAILS["Proposal"])
-            global MANDATORY_FIELDS
-            MANDATORY_FIELDS = True
-            try:
-                set_stage("Berar Finance Limited", "Contacted", details={"contact_name": "X"})
-                raise AssertionError("missing mandatory fields should be refused")
-            except ValueError as e:
-                assert "designation is required" in str(e) and "next_followup_date" in str(e), e
-            try:
-                set_stage("Berar Finance Limited", "Proposal",
-                          details=EXAMPLE_DETAILS["Proposal"] | {"size_cr": "nan"})
-                raise AssertionError("nan size should be refused")
-            except ValueError:
-                pass
-            try:
-                set_stage("Berar Finance Limited", "Lost",
-                          details={"lost_reason": "Lost to another CRA", "note": "x"})
-                raise AssertionError("lost_to should be required")
-            except ValueError as e:
-                assert "lost_to" in str(e)
-            MANDATORY_FIELDS = False
-            assert list_leads()[0]["stage_details"]["Proposal"]["size_cr"] == 200.0
-            assert list_leads()[0]["next_followup_date"] == "2026-10-05"
+            set_stage("Berar Finance Limited", "Proposal", details={"note": "sent terms"})
+            assert list_leads()[0]["stage_details"]["Proposal"]["note"] == "sent terms"
+            assert list_leads()[0]["status"] == "In progress"
+            assert simple_status("Mandated") == "Won" and simple_status("Identified") == "Pending"
+            assert stale_days("Pending", "2026-09-01", "2026-09-10") == 2
+            assert stale_days("In progress", "2026-09-01", "2026-09-10") is None
 
             # Admin reassign (SQLite path) is logged with its reason.
             reassign("Berar Finance Limited", "hema", "Avinash on leave", None, {"hema", "udit"})

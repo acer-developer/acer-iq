@@ -2,11 +2,22 @@ import React, { useState, useEffect, useCallback } from "react";
 import { apiUrl } from "../lib/api.js";
 import { apiFetch, authConfigured, openAuthed } from "../lib/auth.js";
 import { useProfile } from "../lib/profile.js";
+import StatusControl, { STATUS_STYLE } from "./StatusControl.jsx";
 
-// The pipeline, built to BD_LIST_SPEC.md sections 3-4.
-// - Every stage move records that stage's mandatory fields. The form is built
-//   from /api/pipeline/schema, the same table the server validates against,
-//   so the two cannot drift.
+// Statuses, not stages (operator 2026-09-29; BD_LIST_SPEC.md section 3).
+const GROUPS = ["Pending", "In progress", "Won", "Lost"];
+const GROUP_LABEL = { Pending: "Pending", "In progress": "In progress", Won: "Closed - Won", Lost: "Closed - Lost" };
+const STALE = { Pending: 7, "In progress": 14 };
+const staleBy = (l) => {
+  const lim = STALE[l.status];
+  if (!lim || !l.updated_at) return 0;
+  const d = Math.floor((Date.now() - new Date(l.updated_at).getTime()) / 86400000);
+  return d > lim ? d - lim : 0;
+};
+
+// The pipeline, built to BD_LIST_SPEC.md sections 3-4 (section 3 as
+// superseded by the operator: three statuses, one click, nothing mandatory
+// except Won/Lost when closing; staleness instead of follow-up dates).
 // - Admin sees every BD's leads plus the team screen; a BD profile sees only
 //   theirs. Rows another signed-in user owns are read-only: RLS would refuse
 //   the write, so the UI does not offer it.
@@ -18,10 +29,6 @@ const FLAG_META = {
   multi_cra:      { label: "Multi-CRA",      color: "bg-amber-50 text-amber-700 border-amber-200" },
 };
 
-const LABEL = (f) => f.replace(/_rs$/, " (Rs)").replace(/_cr$/, " (Rs cr)").replace(/_/g, " ");
-// The BD's own calendar day (toISOString is UTC - a day behind in India
-// until 05:30, which would mark tomorrow's follow-ups overdue).
-const today = () => new Date().toLocaleDateString("en-CA");
 
 async function jsonOrThrow(res) {
   const body = await res.json().catch(() => ({}));
@@ -34,92 +41,6 @@ async function jsonOrThrow(res) {
     throw new Error(body.detail ?? `HTTP ${res.status}`);
   }
   return body;
-}
-
-function Field({ spec, value, onChange }) {
-  const cls = "mt-0.5 w-full rounded-lg border border-gray-200 px-2 py-1 text-xs focus:border-blue-500 focus:outline-none";
-  let input;
-  if (spec.kind === "choice") {
-    input = (
-      <select value={value ?? ""} onChange={(e) => onChange(e.target.value)} className={cls}>
-        <option value="">Choose...</option>
-        {spec.options.map((o) => <option key={o} value={o}>{o}</option>)}
-      </select>
-    );
-  } else if (spec.kind === "date") {
-    input = <input type="date" value={value ?? ""} onChange={(e) => onChange(e.target.value)} className={cls} />;
-  } else if (spec.kind === "number") {
-    input = <input type="number" min="0" step="any" value={value ?? ""} onChange={(e) => onChange(e.target.value)} className={cls} />;
-  } else {
-    input = <input type="text" value={value ?? ""} onChange={(e) => onChange(e.target.value)} className={cls} />;
-  }
-  return (
-    <label className="block text-[11px] font-medium capitalize text-gray-600">
-      {LABEL(spec.name)}{spec.required && <span className="text-red-500"> *</span>}
-      {input}
-    </label>
-  );
-}
-
-function StageForm({ lead, schema, onSubmit, onCancel }) {
-  const [stage, setStage] = useState(lead.stage);
-  const [details, setDetails] = useState({});
-  const [error, setError] = useState("");
-  const [saving, setSaving] = useState(false);
-  const fields = schema?.fields?.[stage] ?? [];
-
-  const pick = (s) => {
-    setStage(s);
-    // Sensible defaults for dates only; nothing a BD must actually record is prefilled.
-    const d = {};
-    for (const f of schema?.fields?.[s] ?? []) if (f.kind === "date" && !f.name.startsWith("next_")) d[f.name] = today();
-    setDetails(d);
-    setError("");
-  };
-
-  const submit = async () => {
-    const missing = fields.filter((f) => f.required && !String(details[f.name] ?? "").trim()).map((f) => LABEL(f.name));
-    if (stage === "Lost" && details.lost_reason === "Lost to another CRA" && !details.lost_to) missing.push("lost to");
-    if (missing.length) { setError(`Required: ${missing.join(", ")}`); return; }
-    setSaving(true);
-    try { await onSubmit(stage, details); }
-    catch (e) { setError(e.message); }
-    finally { setSaving(false); }
-  };
-
-  return (
-    <div className="mt-3 border-t border-gray-100 pt-3">
-      <div className="flex flex-wrap items-center gap-1.5">
-        <span className="text-xs text-gray-500">Move to</span>
-        {(schema?.stages ?? []).filter((s) => s !== lead.stage).map((s) => (
-          <button key={s} onClick={() => pick(s)}
-            className={`rounded-full border px-2.5 py-0.5 text-xs ${stage === s ? "border-blue-600 bg-blue-600 text-white" : "border-gray-200 text-gray-600 hover:bg-gray-50"}`}>
-            {s}
-          </button>
-        ))}
-      </div>
-      {stage !== lead.stage && (
-        <>
-          {fields.length > 0 && (
-            <div className="mt-2 grid grid-cols-2 gap-2 md:grid-cols-3">
-              {fields.map((f) => (
-                <Field key={f.name} spec={f} value={details[f.name]}
-                  onChange={(v) => setDetails((d) => ({ ...d, [f.name]: v }))} />
-              ))}
-            </div>
-          )}
-          {error && <p className="mt-2 text-xs font-medium text-red-700">{error}</p>}
-          <div className="mt-2 flex gap-2">
-            <button onClick={submit} disabled={saving}
-              className="rounded-lg bg-blue-600 px-3 py-1 text-xs font-medium text-white hover:bg-blue-700 disabled:opacity-50">
-              {saving ? "Saving..." : `Save as ${stage}`}
-            </button>
-            <button onClick={onCancel} className="rounded-lg border border-gray-200 px-3 py-1 text-xs text-gray-500">Cancel</button>
-          </div>
-        </>
-      )}
-    </div>
-  );
 }
 
 function EventLog({ companyName }) {
@@ -182,19 +103,9 @@ function LeadCard({ lead, schema, bds, isAdmin, onChanged }) {
   const [panel, setPanel] = useState("");
   const [error, setError] = useState("");
   const ownerName = bds.find((b) => b.id === lead.owner)?.name ?? (lead.owner || "Unassigned");
-  const overdue = lead.next_followup_date && lead.next_followup_date < today()
-    && !["Mandated", "Lost"].includes(lead.stage);
   const readOnly = lead.mine === false;
   const current = (lead.stage_details ?? {})[lead.stage];
 
-  const move = async (stage, details) => {
-    await jsonOrThrow(await apiFetch(`/api/leads/${encodeURIComponent(lead.company_name)}/stage`, {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ stage, note: details.note ?? "", details }),
-    }));
-    setPanel("");
-    onChanged();
-  };
   const remove = async () => {
     if (!window.confirm(`Remove ${lead.company_name}? Its history is kept.`)) return;
     try {
@@ -226,16 +137,12 @@ function LeadCard({ lead, schema, bds, isAdmin, onChanged }) {
               <span key={k} className={`inline-flex rounded-full border px-2 py-0.5 text-[10px] font-bold ${FLAG_META[k].color}`}>{FLAG_META[k].label}</span>
             ))}
           </div>
-          {lead.next_followup_date && (
-            <p className={`mt-1 text-xs ${overdue ? "font-semibold text-red-700" : "text-gray-500"}`}>
-              Next follow-up {lead.next_followup_date}{overdue && " - OVERDUE"}
-            </p>
-          )}
-          {current && Object.keys(current).length > 0 && (
-            <p className="mt-1 text-[11px] text-gray-500">
-              {Object.entries(current).map(([k, v]) => `${LABEL(k)}: ${v}`).join(" · ")}
-            </p>
-          )}
+          <p className={`mt-1 text-[11px] ${staleBy(lead) ? "font-semibold text-red-700" : "text-gray-400"}`}>
+            {lead.updated_at && `Updated ${new Date(lead.updated_at).toLocaleDateString("en-IN")}`}
+            {current?.changed_by && ` by ${current.changed_by}`}
+            {staleBy(lead) > 0 && ` - stale (${staleBy(lead)} days over)`}
+            {current?.lost_reason && ` - lost: ${current.lost_reason}`}
+          </p>
           {lead.notes && <p className="mt-1.5 rounded-md bg-gray-50 px-2 py-1 text-xs text-gray-600">{lead.notes}</p>}
           {readOnly && <p className="mt-1 text-[10px] text-gray-400">Another BD's lead - read-only for you.</p>}
           {error && <p className="mt-1.5 text-xs font-medium text-red-700">{error}</p>}
@@ -243,10 +150,8 @@ function LeadCard({ lead, schema, bds, isAdmin, onChanged }) {
         <div className="flex shrink-0 flex-col items-end gap-1.5">
           <button onClick={() => openAuthed(`/api/brief/${encodeURIComponent(lead.company_name)}`)}
             className="rounded-lg border border-gray-200 bg-white px-2.5 py-1 text-xs font-medium text-gray-600 hover:bg-gray-50">Brief</button>
-          {!readOnly && (
-            <button onClick={() => setPanel(panel === "move" ? "" : "move")}
-              className="rounded-lg border border-gray-200 bg-white px-2.5 py-1 text-xs font-medium text-gray-600 hover:bg-gray-50">Move</button>
-          )}
+          <StatusControl companyName={lead.company_name} status={lead.status} readOnly={readOnly}
+            onChanged={onChanged} />
           {isAdmin && (
             <button onClick={() => setPanel(panel === "reassign" ? "" : "reassign")}
               className="rounded-lg border border-gray-200 bg-white px-2.5 py-1 text-xs font-medium text-gray-600 hover:bg-gray-50">Reassign</button>
@@ -257,7 +162,6 @@ function LeadCard({ lead, schema, bds, isAdmin, onChanged }) {
           )}
         </div>
       </div>
-      {panel === "move" && <StageForm lead={lead} schema={schema} onSubmit={move} onCancel={() => setPanel("")} />}
       {panel === "reassign" && <Reassign lead={lead} bds={bds} onDone={() => { setPanel(""); onChanged(); }} />}
       {panel === "history" && <EventLog companyName={lead.company_name} />}
     </div>
@@ -302,11 +206,6 @@ function AddSelfSourced({ bds, profile, isAdmin, onDone }) {
   );
 }
 
-function money(n) {
-  if (!n) return "0";
-  return n >= 1e7 ? `${(n / 1e7).toFixed(2)} cr` : n >= 1e5 ? `${(n / 1e5).toFixed(1)} L` : n.toLocaleString("en-IN");
-}
-
 function TeamSummary() {
   const [data, setData] = useState(null);
   const [error, setError] = useState("");
@@ -331,9 +230,9 @@ function TeamSummary() {
         <table className="w-full text-left text-xs">
           <thead className="text-[10px] uppercase tracking-wide text-gray-400">
             <tr>
-              <th className="py-1 pr-3">BD</th><th className="pr-3">List coverage</th><th className="pr-3">Contacted→Proposal</th>
-              <th className="pr-3">Proposal→Mandated</th><th className="pr-3">In proposal</th><th className="pr-3">Mandated</th>
-              <th className="pr-3">Overdue</th><th className="pr-3">Lost reasons</th><th className="pr-3">Self-sourced</th>
+              <th className="py-1 pr-3">BD</th><th className="pr-3">List touched</th><th className="pr-3">Pending</th>
+              <th className="pr-3">In progress</th><th className="pr-3">Won</th><th className="pr-3">Lost</th>
+              <th className="pr-3">Stale</th><th className="pr-3">Lost reasons</th><th className="pr-3">Self-sourced</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-100">
@@ -341,13 +240,14 @@ function TeamSummary() {
               <tr key={id} className="align-top">
                 <td className="py-1.5 pr-3 font-semibold text-gray-900">{b.name}</td>
                 <td className="pr-3">{b.assigned ? `${b.touched}/${b.assigned} (${b.coverage_pct}%)` : data.list_generated ? "no names" : "list not built yet"}</td>
-                <td className="pr-3">{b.conv_contacted_to_proposal ?? "-"}{b.conv_contacted_to_proposal != null && "%"}</td>
-                <td className="pr-3">{b.conv_proposal_to_mandated ?? "-"}{b.conv_proposal_to_mandated != null && "%"}</td>
-                <td className="pr-3">Rs {b.proposal_cr.toFixed(0)} cr · fee {money(b.proposal_fees_rs)}</td>
-                <td className="pr-3">Rs {b.mandated_cr.toFixed(0)} cr · fee {money(b.mandated_fees_rs)}</td>
+                {["Pending", "In progress", "Won", "Lost"].map((k) => (
+                  <td key={k} className="pr-3">
+                    <span className={`rounded-full border px-1.5 py-0.5 ${STATUS_STYLE[k]}`}>{b.status_counts?.[k] ?? 0}</span>
+                  </td>
+                ))}
                 <td className="pr-3">
-                  {b.overdue.length === 0 ? "none" : b.overdue.slice(0, 4).map((o) => (
-                    <div key={o.company_name} className="text-red-700">{o.company_name} ({o.days_late}d)</div>
+                  {(b.stale ?? []).length === 0 ? "none" : b.stale.slice(0, 4).map((o) => (
+                    <div key={o.company_name} className="text-red-700">{o.company_name} ({o.status}, +{o.days_over}d)</div>
                   ))}
                 </td>
                 <td className="pr-3">{Object.entries(b.lost_reasons).map(([r, n]) => `${r} ${n}`).join(", ") || "-"}</td>
@@ -396,12 +296,12 @@ export default function PipelinePage() {
 
   useEffect(() => { fetchLeads(); }, [fetchLeads]);
 
-  const stages = schema?.stages ?? Object.keys(funnel);
+  const stages = GROUPS;
   // Admin can look at one BD at a time without leaving Admin.
   const shown = !isAdmin || ownerFilter === "all" ? leads
     : leads.filter((l) => (l.owner || "") === (ownerFilter === "unassigned" ? "" : ownerFilter));
   const shownFunnel = {};
-  for (const s of stages) shownFunnel[s] = shown.filter((l) => l.stage === s).length;
+  for (const s of stages) shownFunnel[s] = shown.filter((l) => l.status === s).length;
 
   return (
     <div className="flex flex-1 flex-col overflow-hidden bg-gray-50">
@@ -429,7 +329,7 @@ export default function PipelinePage() {
           {stages.map((s) => (
             <div key={s} className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2">
               <div className="text-lg font-bold text-gray-900">{shownFunnel[s] ?? 0}</div>
-              <div className="text-[10px] uppercase tracking-wide text-gray-400">{s}</div>
+              <div className="text-[10px] uppercase tracking-wide text-gray-400">{GROUP_LABEL[s]}</div>
             </div>
           ))}
         </div>
@@ -468,13 +368,13 @@ export default function PipelinePage() {
       {!loading && shown.length > 0 && (
         <div className="flex-1 space-y-6 overflow-y-auto px-6 py-4">
           {stages.map((stage) => {
-            const items = shown.filter((l) => l.stage === stage);
+            const items = shown.filter((l) => l.status === stage);
             return (
               <div key={stage}>
                 <h3 className="mb-2 text-xs font-bold uppercase tracking-wide text-gray-400">
-                  {stage} <span className="text-gray-300">({items.length})</span>
+                  {GROUP_LABEL[stage]} <span className="text-gray-300">({items.length})</span>
                 </h3>
-                {items.length === 0 ? <p className="text-xs text-gray-300">No leads at this stage.</p> : (
+                {items.length === 0 ? <p className="text-xs text-gray-300">None.</p> : (
                   <div className="space-y-2">
                     {items.map((l) => (
                       <LeadCard key={`${l.owner}-${l.company_name}`} lead={l} schema={schema}

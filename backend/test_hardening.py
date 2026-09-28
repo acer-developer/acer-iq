@@ -804,6 +804,36 @@ def test_admin_actions_need_a_verified_admin():
         ps.per_user, database.verify_user, settings.admin_emails = real_pu, real_vu, real_admins
 
 
+def test_status_model_one_click_and_stamped():
+    """Operator 2026-09-29: three statuses, no stages. A BD sets one with a
+    single call; the server stamps who; Lost reasons are a fixed list."""
+    import asyncio, tempfile
+    from pathlib import Path
+    from fastapi import HTTPException
+    from backend import database, main
+    from backend.pipeline import pipeline_store as ps
+    real, real_client = ps.DB_PATH, database.get_client
+    ps.DB_PATH = Path(tempfile.mkdtemp()) / "t.sqlite"
+    database.get_client = lambda: None
+    try:
+        ps.save_lead({"company_name": "Acme Finance Limited"})
+        asyncio.run(main.set_lead_status("Acme Finance Limited", main.StatusRequest(status="In progress"), authorization=None))
+        lead = ps.list_leads()[0]
+        assert lead["status"] == "In progress" and lead["stage_details"]["Contacted"]["changed_by"], lead
+        asyncio.run(main.set_lead_status("Acme Finance Limited",
+                                         main.StatusRequest(status="Lost", lost_reason="TAT"), authorization=None))
+        assert ps.list_leads()[0]["status"] == "Lost"
+        for bad in (main.StatusRequest(status="Proposal"),
+                    main.StatusRequest(status="Lost", lost_reason="Bad luck")):
+            try:
+                asyncio.run(main.set_lead_status("Acme Finance Limited", bad, authorization=None))
+                raise AssertionError(f"accepted {bad}")
+            except HTTPException as e:
+                assert e.status_code == 400
+    finally:
+        ps.DB_PATH, database.get_client = real, real_client
+
+
 def test_per_user_pipeline_refuses_an_anonymous_caller():
     """With Supabase configured, leads are per BD. A request with no session
     must get 401 - never the old shared SQLite list, which would mix four

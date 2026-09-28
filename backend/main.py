@@ -478,6 +478,13 @@ class StageRequest(BaseModel):
     details: dict | None = None
 
 
+class StatusRequest(BaseModel):
+    # Pending | In progress | Won | Lost  ("Closed" in the UI forces Won/Lost)
+    status: str
+    note: str = ""
+    lost_reason: str | None = None
+
+
 class ReassignRequest(BaseModel):
     owner: str
     reason: str
@@ -543,6 +550,28 @@ async def move_saved_lead(company_name: str, req: StageRequest,
         raise HTTPException(status_code=400, detail=str(e))
 
 
+@app.post("/api/leads/{company_name}/status")
+async def set_lead_status(company_name: str, req: StatusRequest,
+                          authorization: str | None = Header(None)):
+    """The BD's one click (operator: statuses, not stages). Who changed it and
+    when is stamped by the server - the BD types nothing (Head of BD)."""
+    stage = pipeline_store.SIMPLE_STATUS.get(req.status)
+    if stage is None:
+        raise HTTPException(status_code=400, detail="status must be Pending, In progress, Won or Lost")
+    tok = _bearer(authorization)
+    who = await _pipeline(lambda: pipeline_store.caller(tok))
+    details = {"note": req.note.strip()[:300], "changed_by": who.get("email") or "local"}
+    if stage == "Lost" and req.lost_reason:
+        details["lost_reason"] = req.lost_reason
+    try:
+        return await _pipeline(lambda: pipeline_store.set_stage(
+            company_name, stage, req.note, token=tok, details=details))
+    except KeyError:
+        raise HTTPException(status_code=404, detail=f"{company_name} is not saved")
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
 @app.post("/api/leads/{company_name}/reassign")
 async def reassign_lead(company_name: str, req: ReassignRequest,
                         authorization: str | None = Header(None)):
@@ -568,7 +597,11 @@ async def pipeline_schema():
                              "required": r and pipeline_store.MANDATORY_FIELDS}
                             for f, (k, o, r) in spec.items()]
                        for st, spec in pipeline_store.STAGE_FIELDS.items()},
-            "instruments": pipeline_store.INSTRUMENTS}
+            "instruments": pipeline_store.INSTRUMENTS,
+            "statuses": ["Pending", "In progress", "Closed"],
+            "closed_results": ["Won", "Lost"],
+            "lost_reasons": pipeline_store.SIMPLE_LOST_REASONS,
+            "stale_days": pipeline_store.STALE_DAYS}
 
 
 @app.get("/api/pipeline/team")

@@ -1,5 +1,8 @@
 # BD List + Pipeline — spec from the ACER Head of BD (2026-09-29)
 
+> **Section 3 superseded by the operator the same day — see §3.** Everything
+> else stands.
+
 Decided in a plan review (gstack plan-ceo-review, mode: HOLD SCOPE) with the
 Head of BD as reviewer. **Build to this; do not re-litigate it.** Engineering
 non-negotiables (no dummy data, sources + read dates, reasons, empty vs broken,
@@ -34,7 +37,27 @@ Contact route ∈ {RBI-registry email (NBFC only), Company website/IR, Via
 lender/banker, Via arranger, BD network} — the tool fills only a route it can
 actually source.
 
-## 3. Mandatory fields per stage move (Lost allowed from any stage)
+## 3. ~~Mandatory fields per stage move~~ — SUPERSEDED 2026-09-29 (operator)
+
+**Operator override:** "no need of those stages, just list the companies with
+2-3 statuses." The Head of BD then decided, within that rule:
+- **Statuses:** `Pending` / `In progress` / `Closed`. Choosing Closed forces
+  one tap: **Won** or **Lost** (mandatory — month-end outcomes need it).
+  Lost may carry an optional reason ∈ {Price, TAT, Went to other agency,
+  Issuer deferred, No response}.
+- **Recorded on a change:** nothing the BD must type. The system stamps who and
+  when; an optional one-line note.
+- **Overdue → staleness** (no date field): Pending with no change > 7 days,
+  In progress with no change > 14 days.
+- Self-sourced leads and Admin reassign: kept.
+- Stored stages map: Pending=Identified, In progress=Contacted,
+  Won=Mandated, Lost=Lost (the DB constraint and reports are unchanged).
+- **Admin "all BDs" view**, per company: BD, company, instrument, urgency,
+  trigger, status, Won/Lost, last updated, reason on hover, self-sourced
+  tag; per BD at the top: count per status, % of list touched, Won count,
+  stale count; clicking a BD filters to their list.
+
+Original section 3, kept for the record (no longer built):
 - **Contacted**: contact_name, designation, channel ∈ {Email, Call, In-person,
   Via banker, LinkedIn}, contact_date, next_followup_date
 - **Meeting**: meeting_date, attendees_client, attendees_acer,

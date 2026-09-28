@@ -2,6 +2,15 @@ import React, { useState, useEffect, useCallback } from "react";
 import { apiFetch } from "../lib/auth.js";
 import { safeUrl } from "../lib/safeUrl.js";
 import { useProfile } from "../lib/profile.js";
+import StatusControl, { STATUS_STYLE } from "./StatusControl.jsx";
+
+// Same folding as backend pipeline_store.norm_name, so a list name and its
+// saved lead meet on one key.
+export const fold = (n) => (n || "").toUpperCase().replace(/\s+/g, " ").trim()
+  .replace(/ (PRIVATE LIMITED|PVT LTD|PVT\. LTD\.|LIMITED|LTD\.|LTD)$/, "").replace(/[ .,-]+$/, "");
+const STALE = { Pending: 7, "In progress": 14 };
+const daysSince = (iso) => (iso ? Math.floor((Date.now() - new Date(iso).getTime()) / 86400000) : null);
+const isStale = (st, updated) => STALE[st] != null && daysSince(updated) > STALE[st];
 
 // Tab 2 - the monthly BD list (backend/pipeline/bd_list.py). Generated once a
 // month and frozen; Admin sees all four BDs, a BD profile sees only theirs.
@@ -47,15 +56,7 @@ function Fact({ label, value }) {
   );
 }
 
-function Row({ row, owner }) {
-  const [state, setState] = useState("");
-  const add = async () => {
-    setState("saving");
-    try {
-      const r = await addToPipeline(row, owner);
-      setState(r.already_saved ? "already in a pipeline" : "added");
-    } catch (e) { setState(`failed: ${e.message}`); }
-  };
+function Row({ row, owner, lead, onChanged, readOnly }) {
   return (
     <li className="px-5 py-3">
       <div className="flex items-start gap-3">
@@ -93,13 +94,14 @@ function Row({ row, owner }) {
             ))}
           </p>
         </div>
-        <div className="shrink-0 text-right">
-          <button onClick={add} disabled={state === "saving" || state === "added"}
-            className="rounded-lg border border-gray-200 bg-white px-2.5 py-1 text-xs font-medium text-gray-600 hover:bg-gray-50 disabled:opacity-50">
-            {state === "added" ? "In pipeline" : state === "saving" ? "Saving..." : "Add to pipeline"}
-          </button>
-          {state && state !== "saving" && state !== "added" && (
-            <p className={`mt-1 max-w-[12rem] text-[10px] ${state.startsWith("failed") ? "text-red-600" : "text-gray-500"}`}>{state}</p>
+        <div className="shrink-0">
+          <StatusControl companyName={row.company_name} status={lead?.status ?? "Pending"}
+            readOnly={readOnly} ensureSaved={lead ? null : () => addToPipeline(row, owner)}
+            onChanged={onChanged} />
+          {lead?.updated_at && (
+            <p className={`mt-1 text-right text-[10px] ${isStale(lead.status, lead.updated_at) ? "font-semibold text-red-700" : "text-gray-400"}`}>
+              updated {readDate(lead.updated_at)}{isStale(lead.status, lead.updated_at) && " - stale"}
+            </p>
           )}
         </div>
       </div>
@@ -107,8 +109,46 @@ function Row({ row, owner }) {
   );
 }
 
-function AllBDsTable({ rows, bds, status }) {
-  const name = (id) => bds.find((b) => b.id === id)?.name ?? id;
+function AdminSummary({ rows, bds, leads, onPick, generatedAt }) {
+  return (
+    <div className="grid gap-3 md:grid-cols-4">
+      {bds.map((b) => {
+        const mine = rows.filter((r) => r.bd_id === b.id && !r.in_progress);
+        const st = (r) => leads[r.key]?.status ?? "Pending";
+        const counts = { Pending: 0, "In progress": 0, Won: 0, Lost: 0 };
+        for (const r of rows.filter((x) => x.bd_id === b.id)) counts[st(r)] += 1;
+        const touched = mine.filter((r) => st(r) !== "Pending").length;
+        // A name nobody has touched is Pending since the list was generated.
+        const stale = rows.filter((r) => r.bd_id === b.id)
+          .filter((r) => isStale(st(r), leads[r.key]?.updated_at ?? generatedAt)).length;
+        return (
+          <button key={b.id} onClick={() => onPick(b.id)}
+            className="rounded-xl border border-gray-200 bg-white p-3 text-left hover:border-blue-300">
+            <div className="flex items-center justify-between">
+              <span className="text-sm font-bold text-gray-900">{b.name}</span>
+              <span className="text-[11px] text-gray-400">{mine.length ? Math.round((100 * touched) / mine.length) : 0}% touched</span>
+            </div>
+            <div className="mt-1.5 flex flex-wrap gap-1 text-[11px]">
+              {Object.entries(counts).map(([k, v]) => (
+                <span key={k} className={`rounded-full border px-1.5 py-0.5 ${STATUS_STYLE[k]}`}>{k} {v}</span>
+              ))}
+            </div>
+            <p className="mt-1.5 text-[11px] text-gray-500">
+              Won {counts.Won} · <span className={stale ? "font-semibold text-red-700" : ""}>{stale} stale</span>
+            </p>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+function AllBDsTable({ rows, bds, leads, selfSourced }) {
+  const name = (id) => bds.find((b) => b.id === id)?.name ?? (id || "Unassigned");
+  const all = [...rows.map((r) => ({ ...r, lead: leads[r.key] })),
+               ...selfSourced.map((l) => ({ key: fold(l.company_name), bd_id: l.owner, rank: "-",
+                 company_name: l.company_name, instrument: l.flags?.instrument ?? "-", urgency: "-",
+                 trigger: "self-sourced", reason: l.notes, lead: l, self: true }))];
   return (
     <div className="overflow-x-auto rounded-xl border border-gray-200 bg-white">
       <table className="w-full text-left text-xs">
@@ -116,26 +156,32 @@ function AllBDsTable({ rows, bds, status }) {
           <tr>
             <th className="px-4 py-2">BD</th><th className="py-2 pr-3">#</th><th className="pr-3">Company</th>
             <th className="pr-3">Instrument</th><th className="pr-3">Urgency</th><th className="pr-3">Trigger</th>
-            <th className="pr-3">Pipeline status</th><th className="pr-3">Score</th>
+            <th className="pr-3">Status</th><th className="pr-3">Last updated</th>
           </tr>
         </thead>
         <tbody className="divide-y divide-gray-100">
-          {rows.map((r) => {
-            const st = status[r.key];
+          {all.map((r) => {
+            const st = r.lead?.status ?? "Pending";
+            const stale = r.lead && isStale(st, r.lead.updated_at);
             return (
               <tr key={`${r.bd_id}-${r.key}`} className="align-top">
                 <td className="px-4 py-1.5 font-semibold text-gray-900">{name(r.bd_id)}</td>
                 <td className="py-1.5 pr-3 text-gray-400">{r.rank}</td>
                 <td className="pr-3 text-gray-900" title={r.reason}>{r.company_name}
-                  {r.in_progress && <span className="ml-1 text-emerald-700">(in progress)</span>}
+                  {r.self && <span className="ml-1 rounded-full border border-emerald-200 bg-emerald-50 px-1.5 text-[10px] text-emerald-700">self-sourced</span>}
+                  {r.in_progress && <span className="ml-1 text-emerald-700">(carried, in progress)</span>}
                   {r.carried_over && <span className="ml-1 text-purple-700">(carried over)</span>}</td>
                 <td className="pr-3">{r.instrument}</td>
                 <td className={`pr-3 ${r.urgency === "This week" ? "font-semibold text-red-700" : ""}`}>{r.urgency}</td>
-                <td className="pr-3">{r.trigger.replace("_", " ")}</td>
-                <td className={`pr-3 ${st ? "text-gray-900" : "text-gray-400"}`}>
-                  {st ? `${st.stage}${st.owner && st.owner !== r.bd_id ? ` (with ${name(st.owner)})` : ""}` : "not worked yet"}
+                <td className="pr-3">{String(r.trigger).replace("_", " ")}</td>
+                <td className="pr-3">
+                  <span className={`rounded-full border px-2 py-0.5 text-[11px] font-semibold ${STATUS_STYLE[st]}`}>
+                    {st === "Won" || st === "Lost" ? `Closed - ${st}` : st}
+                  </span>
                 </td>
-                <td className="pr-3">{r.score}</td>
+                <td className={`pr-3 ${stale ? "font-semibold text-red-700" : "text-gray-500"}`}>
+                  {r.lead?.updated_at ? `${readDate(r.lead.updated_at)}${stale ? " (stale)" : ""}` : "not touched"}
+                </td>
               </tr>
             );
           })}
@@ -148,7 +194,8 @@ function AllBDsTable({ rows, bds, status }) {
 export default function BDListPage() {
   const { profile, bds, isAdmin } = useProfile();
   const [adminView, setAdminView] = useState("all");
-  const [status, setStatus] = useState({});
+  const [leads, setLeads] = useState({});          // fold(name) -> saved lead
+  const [selfSourced, setSelfSourced] = useState([]);
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -174,16 +221,17 @@ export default function BDListPage() {
 
   useEffect(() => { load(); }, [load]);
 
-  // Admin: where each of this month's names stands in the team pipeline.
-  useEffect(() => {
-    if (!isAdmin) return;
-    apiFetch("/api/leads?scope=all").then((r) => (r.ok ? r.json() : { leads: [] })).then((d) => {
+  // Where each of this month's names stands: Admin sees the team, a BD their own.
+  const loadLeads = useCallback(() => {
+    const q = isAdmin ? "?scope=all" : profile.id ? `?scope=all&owner=${encodeURIComponent(profile.id)}` : "?scope=mine";
+    apiFetch(`/api/leads${q}`).then((r) => (r.ok ? r.json() : { leads: [] })).then((d) => {
       const m = {};
-      const fold = (n) => n.toUpperCase().replace(/\s+/g, " ").replace(/ (PRIVATE LIMITED|PVT LTD|PVT\. LTD\.|LIMITED|LTD\.|LTD)$/, "").replace(/[ .,-]+$/, "");
-      for (const l of d.leads ?? []) m[fold(l.company_name)] = { stage: l.stage, owner: l.owner };
-      setStatus(m);
+      for (const l of d.leads ?? []) m[fold(l.company_name)] = l;
+      setLeads(m);
+      setSelfSourced((d.leads ?? []).filter((l) => l.origin === "self_sourced"));
     }).catch(() => {});
-  }, [isAdmin, data]);
+  }, [isAdmin, profile.id]);
+  useEffect(() => { loadLeads(); }, [loadLeads, data]);
 
   const rows = data?.rows ?? [];
   const shownBds = isAdmin
@@ -250,8 +298,11 @@ export default function BDListPage() {
 
       {data && (
         <div className="flex-1 space-y-4 overflow-y-auto px-6 py-4">
-          {isAdmin && adminView === "all" && rows.length > 0 && (
-            <AllBDsTable rows={rows} bds={bds} status={status} />
+          {isAdmin && adminView === "all" && (
+            <>
+              <AdminSummary rows={rows} bds={bds} leads={leads} onPick={setAdminView} generatedAt={data.generated_at} />
+              <AllBDsTable rows={rows} bds={bds} leads={leads} selfSourced={selfSourced} />
+            </>
           )}
           {!(isAdmin && adminView === "all") && shownBds.map((b) => {
             const mine = rows.filter((r) => r.bd_id === b.id);
@@ -273,7 +324,10 @@ export default function BDListPage() {
                   </p>
                 ) : (
                   <ul className="divide-y divide-gray-100">
-                    {mine.map((r) => <Row key={r.key} row={r} owner={b.id} />)}
+                    {mine.map((r) => (
+                      <Row key={r.key} row={r} owner={b.id} lead={leads[r.key]} onChanged={loadLeads}
+                        readOnly={leads[r.key]?.mine === false} />
+                    ))}
                   </ul>
                 )}
               </section>
