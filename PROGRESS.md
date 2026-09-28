@@ -6,7 +6,7 @@ Do not check an item that is not committed, tested and pushed.
 
 Owner: **OP** = operator (human, cannot be automated) · **NB** = nightly build.
 
-Last updated: 2026-09-28 · Phase in progress: **Cleanup**
+Last updated: 2026-09-28 · Phase in progress: **Phase 1 — Durable persistence**
 
 ---
 
@@ -23,7 +23,7 @@ touches a migration.
 
 ## Phase 0 — Foundations *(BLOCKING — see PREMORTEM §7)*
 
-- [ ] **OP** Run `supabase_schema.sql` in the Supabase SQL editor
+- [ ] **OP** Run `supabase_schema.sql` in the Supabase SQL editor *(now also creates `cra_actions`, the CRA archive — safe to re-run, every statement is `if not exists` / `drop policy if exists`)*
 - [ ] **OP** Enable Email auth provider
 - [ ] **OP** Add the Vercel app URL to auth redirect URLs
 - [ ] **OP** Decide always-on hosting (Oracle Always Free vs ~$7/mo)
@@ -35,8 +35,12 @@ touches a migration.
 Not plain SQLite. `pipeline.sqlite` is gitignored and Render has no disk, so
 production writes are destroyed on every restart — PREMORTEM §1.
 
-- [ ] **NB** Move `news_archive` + `action_history` onto the Postgres-with-SQLite-fallback
-      pattern already in `backend/database.py` (reuse it; do not write a second one)
+- [x] **NB** ~~Move `action_history` onto the Postgres-with-SQLite-fallback
+      pattern already in `backend/database.py`~~ (2026-09-28, `bfc18b1`). Supabase
+      `cra_actions` table added to `supabase_schema.sql`; **not durable until the
+      OP runs that file** — until then it falls back to SQLite and
+      `stats()["durable"]` says `false`. `news_archive` does not exist yet; it is
+      built on the same pattern in the next item.
 - [ ] **NB** `news_archive` table: append-only, dedupe key, `since(days)`, `stats()`, offline `_demo()`
 - [ ] **NB** Wire `market_news.py` and `rss_news.py` to record on every poll
 - [ ] **NB** Per-source `last_successful_read` recorded on every fetch
