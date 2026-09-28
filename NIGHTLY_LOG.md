@@ -5,6 +5,109 @@ what was skipped and why, what is blocking.
 
 ---
 
+## 2026-09-28 (third run — operator-approved overnight build of Phases 0–3)
+
+**Morning summary (read this first).** Phases 0, 1, 2 and 3 are built, tested
+and live on Render + Vercel. Four operator steps turn the last parts on — they
+are at the top of Phase 0 in PROGRESS.md:
+1. Supabase SQL editor → run the whole `supabase_schema.sql` again.
+2. Render → Environment → add `SUPABASE_SERVICE_KEY` (service_role key; server only).
+3. Vercel → Environment Variables → `VITE_SUPABASE_URL` + `VITE_SUPABASE_ANON_KEY`, redeploy.
+4. The four BDs create accounts, then turn off new sign-ups in Supabase.
+Until then: the login screen is off, and the news archive is on SQLite, which
+`/api/health` reports as not durable. The `health-alarm` workflow emails
+about this every 6 hours until it is fixed, which is intended.
+
+**Scope.** The operator asked in chat for all of Phases 0–3 done by morning,
+using gstack review, ponytail comments and the premortem. That overrides the
+usual one-item-per-run rule for tonight. Phase 4+ and the cra-tracker
+(Phase 6) were out of scope. Three backup sessions were scheduled (02:40,
+04:40 and 06:40 IST) to continue from PROGRESS.md if this one stopped.
+
+**What landed (each commit passed all four pre-push checks):**
+- `8b9c6ba` **Phase 0**
+  - Supabase email/password sign-in (sign-up with email confirmation,
+    forgot/reset password) gates the app when the `VITE_*` vars are set.
+  - Per-BD `saved_leads` / `lead_events` through a per-request PostgREST
+    client that carries the BD's token, so row-level security applies.
+  - No login → 401; Supabase down → 503; a stage moved in another tab → 409
+    (compare-and-set on the old stage).
+  - No SQLite fall-through for per-user data.
+  - Also fixed: CORS blocked `DELETE`, so Remove lead never worked from Vercel.
+- `489ec4b` **Phase 1**
+  - `news_archive.py`: append-only archive.
+  - `source_health.py`: last good read per source.
+  - `/api/health` now pages on 48 hours of silence and on non-durable archives.
+  - The Queue tab's empty state says "quiet window" or "a source is down".
+  - `/api/poll` (throttled) plus `keepalive.yml` every 10 minutes: the
+    archives fill with nobody logged in and Render stays awake.
+  - `health-alarm.yml`: a failed run emails the owner.
+- `14ee17b` **Phase 2**
+  - `news_classify.py`: rule-based "major only" filter, sector tags and a
+    one-line reason per item.
+  - Tuned on one live poll: 608 items → 193 major. Live false positives are
+    pinned in its self-check.
+  - Market News reads the archive (7 days to 1 year). Every row shows the
+    source link, the read date and why it matters.
+- `312ee75` **Phase 3**
+  - `macro.py` + Macro tab: macro event → sectors → names with debt maturing
+    inside 9 months (BSE) or thin interest coverage (NSE XBRL) → ranked by
+    winnability. Each name has a reason, and each trigger a source link and
+    read date.
+  - Degrades honestly: a dead input is named, and an incomplete build is
+    never cached.
+- `a4d72b7` **Security and correctness fixes** from a gstack pre-landing
+  review (1 critical, 3 info), all fixed:
+  - Public archives are read-only to the browser key; the backend writes with
+    the service key.
+  - Links are http(s)-only on write, read and render.
+  - `lead_events` are written by a database trigger in the same transaction
+    as the change, and the log is append-only.
+  - `source_health` loads history off the event loop and never lets a
+    restart shorten an outage. On-demand CARE lookups do not page.
+- Ticks: `6f0fbb9`, `c6c12f8`, `58fdb0d`, `f6e32be`. Housekeeping from the
+  second run: `172022e`, `298e55f`, `83322ac`.
+
+**Checks run before every push:** `backend.test_hardening` (66 tests, up from
+58, no network); self-checks for database, action_history, pipeline_store,
+source_health, news_archive, news_classify, macro and lead_queue;
+`npm run build`; boot check (`/api/health` 200). Frontend QA in headless
+Chromium: login screen, the no-auth pill, Market News and Macro with real
+data. Also checked in production after deploy: `/api/poll` archived 623 live
+items, `/api/macro` returned 200, and CI is green on every commit.
+
+**How each change defends the premortem:**
+- **§1 Durability:** every archive uses the one Supabase-with-SQLite-fallback
+  pattern (helpers in `database.py`), and `/api/health` pages while any
+  archive is not durable.
+- **§2 Empty vs broken:** there is a per-source "unreachable since X", and
+  both Queue and News render quiet and broken differently. This was seen for
+  real tonight: NSE rate-limited the sandbox and the UI said so.
+- **§3 Unattended deploys:** the boot check ran before every push, and every
+  hash is listed above.
+- **§5 Name matching:** Macro matches sectors on exact registry names only,
+  with a ponytail comment for the missing industry master.
+- **§6 LLM:** every new "why" line is rule-based, so nothing blanks.
+- **§7 Accountability:** per-BD rows under RLS, and an outcome log that is
+  atomic and append-only.
+- **§8 Monitoring:** health pages on source freshness; the health-alarm email
+  is the alarm.
+
+**Ponytails left** (deliberate shortcuts, each with its upgrade path in the code):
+- Classifier keyword rules.
+- Macro sector-from-name matching (upgrade: an industry master).
+- The 1.25x interest-coverage line for lenders.
+- Python-side lead dedupe per save.
+- A single-worker assumption in `source_health`.
+
+**Blocking / next:**
+- Phase 4 (monthly BD list) is next. It needs the four BD accounts (morning
+  step 4) so the split has real user ids.
+- Phase 6 is still blocked on the acer-cra-tracker decision.
+- Oracle is deferred until Phase 5 (FreeLLMAPI self-hosting).
+
+---
+
 ## 2026-09-28 (second run)
 
 **Read first, in order:** PROGRESS.md, PREMORTEM.md, BUILD_PLAN.md, NIGHTLY_LOG.md.

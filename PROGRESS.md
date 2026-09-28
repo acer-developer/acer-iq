@@ -6,7 +6,7 @@ Do not check an item that is not committed, tested and pushed.
 
 Owner: **OP** = operator (human, cannot be automated) · **NB** = nightly build.
 
-Last updated: 2026-09-28 · Phase in progress: **Phases 0-3 built; review fixes + operator steps** (overnight multi-session build, operator-approved 2026-09-28)
+Last updated: 2026-09-28 · Phase in progress: **Phases 0–3 built and pushed — waiting on the 4 operator morning steps in Phase 0** (Phase 4 next; Phase 6 blocked on the tracker decision)
 
 ---
 
@@ -27,10 +27,14 @@ touches a migration.
 - [x] **OP** ~~Enable Email auth provider~~ (2026-09-28, confirm-email on)
 - [x] **OP** ~~Add the Vercel app URL to auth redirect URLs~~ (2026-09-28, Site URL `https://acer-iq.vercel.app`, redirect `https://acer-iq.vercel.app/**`)
 - [x] **OP** ~~Decide always-on hosting~~ (2026-09-28: **Oracle Cloud Always Free**)
-- [ ] **OP** Create the Oracle Always Free VM (Ubuntu, Mumbai/Hyderabad region, ports 80/443 open) and share its public IP
+- [ ] **OP** *(deferred — not needed before Phase 5)* Oracle Always Free VM. Operator found sign-up too slow (2026-09-28); Render free + `.github/workflows/keepalive.yml` (every 10 min) now keeps the backend awake and the archives filling. A real box is only needed to self-host FreeLLMAPI (Phase 5).
 - [ ] **OP** Decide: fold `acer-cra-tracker` in as the ingestion layer, or keep separate
 - [x] **NB** ~~Wire the login screen and switch `saved_leads` off SQLite~~ (2026-09-28, `8b9c6ba`) — **live only once Vercel has `VITE_SUPABASE_URL` + `VITE_SUPABASE_ANON_KEY`** (see OP item below)
-- [ ] **OP** Vercel → Settings → Environment Variables: add `VITE_SUPABASE_URL` = `https://gmqyelarfyqfsyqvrvzj.supabase.co` and `VITE_SUPABASE_ANON_KEY` = the anon/publishable key, then redeploy. Re-run `supabase_schema.sql` (idempotent) for the new `cin` column and tables.
+- [ ] **OP — morning step 1** Supabase SQL editor: run the whole of `supabase_schema.sql` again (idempotent). Adds `news_archive`, `source_reads`, `saved_leads.cin`, the `lead_events` trigger, and **removes the anon write policies** (security review).
+- [ ] **OP — morning step 2** Render → acer-iq → Environment: add `SUPABASE_SERVICE_KEY` = Supabase → Project Settings → API Keys → **service_role / secret** key. Server-only — never put it in Vercel. Without it, after step 1 the archives fall back to SQLite and `/api/health` says "not durable".
+- [ ] **OP — morning step 3** Vercel → Settings → Environment Variables: add `VITE_SUPABASE_URL` = `https://gmqyelarfyqfsyqvrvzj.supabase.co` and `VITE_SUPABASE_ANON_KEY` = the **anon / publishable** key, then Redeploy. This turns on the login screen and per-BD pipelines.
+- [ ] **OP — morning step 4** Each of the four BDs: open the app → Create account → click the email link → sign in. Then Supabase → Authentication → Sign In / Providers → turn **off** "Allow new users to sign up", so nobody else can register.
+- [ ] **OP — check** `https://acer-iq.onrender.com/api/health` → `"status": "ok"`, `archives.*.durable: true`. The `health-alarm` GitHub workflow emails the repo owner whenever it is not.
 
 ## Phase 1 — Durable persistence *(REWRITTEN after the premortem)*
 
