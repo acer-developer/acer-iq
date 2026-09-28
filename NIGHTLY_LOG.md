@@ -71,6 +71,4 @@ PROGRESS.md's own ordering ("done FIRST").
 **Blocking:** the three Phase 0 OP items remain the operator's. Nothing else
 is blocked right now.
 
-**Commit:** see `git log -1` on `main` immediately after this file was
-committed — recorded in the follow-up line below since the hash cannot be
-known before the commit exists.
+**Commit:** `5048de85110b1d9bea51c4f094c7dd04827305c6`
