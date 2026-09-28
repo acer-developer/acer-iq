@@ -37,6 +37,8 @@ These are build rules, not aspirations. A PR that breaks one does not land.
 ## Order of work
 
 Each phase is landable on its own and leaves the app working.
+**`PROGRESS.md` is the live checklist — what is actually done is recorded there,
+not here.** `PREMORTEM.md` is what this plan is defending against.
 
 ### Phase 0 — Supabase schema  *(blocked on operator)*
 Run `supabase_schema.sql` in the SQL editor, enable Email auth, add the app URL
@@ -44,14 +46,26 @@ to redirects. Creates `searches`, `saved_leads`, `lead_events` with RLS.
 Until this runs the app stays on SQLite as one shared list and nothing breaks.
 Everything in Phase 4 needs `lead_events` to exist.
 
-### Phase 1 — News persistence  *(foundation for 1, 2 and 3)*
+### Phase 1 — **Durable** news persistence  *(rewritten after the premortem)*
 Today `market_news.py` and `rss_news.py` fetch live and discard on every
 refresh. Only CRA rating actions are archived (`action_history.py`).
 
-Add `news_archive` to `backend/registry/data/pipeline.sqlite` following the
-exact pattern in `action_history.py` — dedupe key, append-only, `since(days)`
-and `stats()` helpers, offline self-check. Wire both news fetchers to record
-on every poll.
+**Plain SQLite is not an option.** `backend/registry/data/pipeline.sqlite` is
+gitignored and `render.yaml` declares no disk on a free plan, so every
+production write is destroyed on the next restart — the archive would be a
+silent lie. See PREMORTEM.md §1.
+
+Put `news_archive` (and `action_history`) on the Postgres-with-SQLite-fallback
+pattern **already implemented in `backend/database.py`** — reuse it, do not
+write a second one. SQLite stays as the local-dev path only. Append-only,
+dedupe key, `since(days)` and `stats()` helpers, offline self-check. Wire both
+news fetchers to record on every poll.
+
+Phase 1 also owns the empty-vs-broken distinction (PREMORTEM.md §2): a
+`last_successful_read` per source, `/api/health` reporting per-source freshness
+rather than just process liveness, and empty states that say which they are.
+This is a Phase 1 deliverable, not later polish — a dead scraper and a quiet
+day look identical otherwise, and that is how the tool gets abandoned.
 
 Why first: nothing downstream can spot a trend in a feed that is thrown away.
 
