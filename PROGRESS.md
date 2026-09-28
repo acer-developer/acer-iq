@@ -43,10 +43,10 @@ production writes are destroyed on every restart — PREMORTEM §1.
       OP runs that file** — until then it falls back to SQLite and
       `stats()["durable"]` says `false`. `news_archive` does not exist yet; it is
       built on the same pattern in the next item.
-- [ ] **NB** `news_archive` table: append-only, dedupe key, `since(days)`, `stats()`, offline `_demo()`
-- [ ] **NB** Wire `market_news.py` and `rss_news.py` to record on every poll
-- [ ] **NB** Per-source `last_successful_read` recorded on every fetch
-- [ ] **NB** `/api/health` reports per-source freshness, not just process liveness
+- [x] **NB** ~~`news_archive` table: append-only, dedupe key, `since(days)`, `stats()`, offline `_demo()`~~ (2026-09-28, `489ec4b`; Supabase table in `supabase_schema.sql`, durable once the OP re-runs it)
+- [x] **NB** ~~Wire `market_news.py` and `rss_news.py` to record on every poll~~ (2026-09-28, `489ec4b`; plus `/api/poll` + `.github/workflows/keepalive.yml` every 10 min so it fills with nobody logged in)
+- [x] **NB** ~~Per-source `last_successful_read` recorded on every fetch~~ (2026-09-28, `489ec4b`; `source_health.py`, durable `source_reads`)
+- [x] **NB** ~~`/api/health` reports per-source freshness, not just process liveness~~ (2026-09-28, `489ec4b`; pages on 48h silence; `health-alarm.yml` emails on degraded)
 - [ ] **NB** Empty states say *which* — "no signal today" vs "source unreachable since X"
 
 ## Phase 2 — Tab 3, News kept
