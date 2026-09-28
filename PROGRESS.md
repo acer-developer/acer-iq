@@ -6,7 +6,7 @@ Do not check an item that is not committed, tested and pushed.
 
 Owner: **OP** = operator (human, cannot be automated) · **NB** = nightly build.
 
-Last updated: 2026-09-28 · Phase in progress: **Phase 1 — Durable persistence**
+Last updated: 2026-09-28 · Phase in progress: **Phase 1 — Durable persistence** (overnight multi-session build, operator-approved 2026-09-28)
 
 ---
 
@@ -29,7 +29,8 @@ touches a migration.
 - [x] **OP** ~~Decide always-on hosting~~ (2026-09-28: **Oracle Cloud Always Free**)
 - [ ] **OP** Create the Oracle Always Free VM (Ubuntu, Mumbai/Hyderabad region, ports 80/443 open) and share its public IP
 - [ ] **OP** Decide: fold `acer-cra-tracker` in as the ingestion layer, or keep separate
-- [ ] **NB** Wire the login screen and switch `saved_leads` off SQLite *(unblocked 2026-09-28 — the 3 OP items above are done)*
+- [x] **NB** ~~Wire the login screen and switch `saved_leads` off SQLite~~ (2026-09-28, `8b9c6ba`) — **live only once Vercel has `VITE_SUPABASE_URL` + `VITE_SUPABASE_ANON_KEY`** (see OP item below)
+- [ ] **OP** Vercel → Settings → Environment Variables: add `VITE_SUPABASE_URL` = `https://gmqyelarfyqfsyqvrvzj.supabase.co` and `VITE_SUPABASE_ANON_KEY` = the anon/publishable key, then redeploy. Re-run `supabase_schema.sql` (idempotent) for the new `cin` column and tables.
 
 ## Phase 1 — Durable persistence *(REWRITTEN after the premortem)*
 
