@@ -6,7 +6,7 @@ Do not check an item that is not committed, tested and pushed.
 
 Owner: **OP** = operator (human, cannot be automated) · **NB** = nightly build.
 
-Last updated: 2026-09-28 · Phase in progress: **Phase 1 — Durable persistence** (overnight multi-session build, operator-approved 2026-09-28)
+Last updated: 2026-09-28 · Phase in progress: **Phase 3 — Macro** (overnight multi-session build, operator-approved 2026-09-28)
 
 ---
 
@@ -47,13 +47,13 @@ production writes are destroyed on every restart — PREMORTEM §1.
 - [x] **NB** ~~Wire `market_news.py` and `rss_news.py` to record on every poll~~ (2026-09-28, `489ec4b`; plus `/api/poll` + `.github/workflows/keepalive.yml` every 10 min so it fills with nobody logged in)
 - [x] **NB** ~~Per-source `last_successful_read` recorded on every fetch~~ (2026-09-28, `489ec4b`; `source_health.py`, durable `source_reads`)
 - [x] **NB** ~~`/api/health` reports per-source freshness, not just process liveness~~ (2026-09-28, `489ec4b`; pages on 48h silence; `health-alarm.yml` emails on degraded)
-- [ ] **NB** Empty states say *which* — "no signal today" vs "source unreachable since X"
+- [x] **NB** ~~Empty states say *which* — "no signal today" vs "source unreachable since X"~~ (2026-09-28, Queue `489ec4b`, Market News `14ee17b`)
 
 ## Phase 2 — Tab 3, News kept
 
-- [ ] **NB** Market News reads the archive, not the live call
-- [ ] **NB** Major-only classifier (routine board approvals and market chatter are not news)
-- [ ] **NB** Every row renders source link + read date + one-line why-it-matters
+- [x] **NB** ~~Market News reads the archive, not the live call~~ (2026-09-28, `14ee17b`)
+- [x] **NB** ~~Major-only classifier (routine board approvals and market chatter are not news)~~ (2026-09-28, `14ee17b`; `news_classify.py`, rule-based)
+- [x] **NB** ~~Every row renders source link + read date + one-line why-it-matters~~ (2026-09-28, `14ee17b`)
 
 ## Phase 3 — Tab 1, Macro
 
