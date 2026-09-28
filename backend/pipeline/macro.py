@@ -75,17 +75,21 @@ def company_sectors(name: str, entity_type: str = "", is_bank: bool = False) -> 
     return keys
 
 
+_REG_INDEX: dict = {}
+
+
 def _registry_type(name: str) -> str:
     """Entity type from the RBI registry - exact (folded) name only. A loose
-    match would tag REC Power Development as REC Ltd (PREMORTEM section 5)."""
-    try:
-        from backend.registry import store
-        reg = store.get_by_name(name)
-    except Exception:
-        return ""
-    if reg and norm_name(reg.get("name", "")) == norm_name(name):
-        return reg.get("entity_type", "")
-    return ""
+    match would tag REC Power Development as REC Ltd (PREMORTEM section 5).
+    One registry read per process, not one LIKE scan per name."""
+    global _REG_INDEX
+    if not _REG_INDEX:
+        try:
+            from backend.registry import store
+            _REG_INDEX = store.exact_index()
+        except Exception:
+            return ""
+    return _REG_INDEX.get(norm_name(name), {}).get("entity_type", "")
 
 
 def _winnability_index() -> dict[str, dict]:
@@ -222,7 +226,9 @@ async def _coverage_rows(sectors: set[str]) -> tuple[list[dict], dict]:
             pool.append((sym, rec))
     pool.sort(key=lambda p: fundamentals._filed_at(p[1]), reverse=True)
     budget = pool[:_XBRL_BUDGET]
-    sem = asyncio.Semaphore(4)
+    # Two at a time: each XBRL is a multi-MB download parsed in memory, and
+    # Render's free tier has 512 MB for the whole app.
+    sem = asyncio.Semaphore(2)
 
     async def one(sym, rec):
         async with sem:

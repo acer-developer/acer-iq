@@ -329,17 +329,15 @@ def _is_lender(name: str) -> bool:
     return bool(set(nc.sectors_for(name)) & {"nbfc"})
 
 
-def _registry(name: str) -> dict:
-    """CIN, entity type and RBI-filed email - exact (folded) name match only
-    (PREMORTEM section 5: a loose match puts one company's data on another)."""
+def _registry_index() -> dict:
+    """CIN, entity type and RBI-filed email by exact (folded) name - one read
+    of the registry per build (PREMORTEM section 5: exact match only)."""
     try:
         from backend.registry import store
-        reg = store.get_by_name(name)
-    except Exception:
+        return store.exact_index()
+    except Exception as e:
+        log.warning("registry index unavailable: %s", e)
         return {}
-    if reg and norm_name(reg.get("name", "")) == norm_name(name):
-        return reg
-    return {}
 
 
 def _history() -> tuple[dict, bool]:
@@ -464,8 +462,9 @@ async def _gather() -> tuple[dict, dict]:
         inputs["pipeline"] = {"status": "ok"}
         history = hist[0]
 
+    reg_index = await asyncio.to_thread(_registry_index)
     for key, e in by.items():
-        reg = await asyncio.to_thread(_registry, e["name"])
+        reg = reg_index.get(key, {})
         e["cin"] = reg.get("cin", "")
         if reg.get("entity_type") in ("NBFC", "ARC"):
             e["is_lender"] = True

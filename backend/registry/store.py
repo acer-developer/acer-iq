@@ -5,6 +5,7 @@ Returns dicts shaped like the discovery pipeline expects.
 
 import logging
 import sqlite3
+from contextlib import contextmanager
 from pathlib import Path
 
 from backend.registry.geo import city_coords, jitter
@@ -22,10 +23,19 @@ def available() -> bool:
     return DB_PATH.exists()
 
 
-def _connect() -> sqlite3.Connection:
+@contextmanager
+def _connect():
+    """Read-only connection that is CLOSED on exit. `with sqlite3.connect()`
+    only commits - it never closes - so every lookup used to leak a
+    connection and its page cache. On Render's 512 MB free tier that turned
+    one BD-list build (~200 lookups) into an out-of-memory restart (found
+    2026-09-29)."""
     con = sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True)
     con.row_factory = sqlite3.Row
-    return con
+    try:
+        yield con
+    finally:
+        con.close()
 
 
 def _rank(row: sqlite3.Row) -> tuple:
@@ -203,6 +213,24 @@ def get_by_name(name: str) -> dict | None:
         "symbol": _row_get(row, "symbol"), "isin": _row_get(row, "isin"),
         "source": "NSE listed-company master" if row["entity_type"] == "Listed" else "RBI registry",
     }
+
+
+def exact_index() -> dict:
+    """norm name -> {name, cin, entity_type, email}, for every registry row.
+    One read for callers that look up many names (the BD list), instead of a
+    LIKE scan per name. Exact folded-name identity only (PREMORTEM section 5)."""
+    from backend.pipeline.pipeline_store import norm_name
+    if not available():
+        return {}
+    out: dict[str, dict] = {}
+    with _connect() as con:
+        for r in con.execute("SELECT name, cin, entity_type, email FROM companies"):
+            k = norm_name(r["name"])
+            # Prefer a row that carries a CIN when two spellings collide.
+            if k and (k not in out or (r["cin"] and not out[k]["cin"])):
+                out[k] = {"name": r["name"], "cin": r["cin"] or "",
+                          "entity_type": r["entity_type"], "email": r["email"] or ""}
+    return out
 
 
 def stats() -> dict:
