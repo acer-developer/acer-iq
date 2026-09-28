@@ -41,3 +41,5 @@ __pycache__
 
 # local pipeline database (saved leads + outcome log)
 backend/registry/data/pipeline.sqlite
+
+graphify-out/
