@@ -10,6 +10,17 @@ Last updated: 2026-09-28 · Phase in progress: **1**
 
 ---
 
+## Cleanup — smallest items, done FIRST
+
+These lead deliberately. The first run should prove the whole loop works
+(clone, edit, test, boot, push, tick this file) on something low-risk before it
+touches a migration.
+
+- [x] **NB** ~~Write BUILD_PLAN.md~~ (2026-09-28)
+- [x] **NB** ~~Write PREMORTEM.md~~ (2026-09-28)
+- [ ] **NB** Delete `frontend/src/components/MapView.jsx` and its use in `App.jsx` (India map dropped)
+- [ ] **NB** Delete the stale "falls back to mock data" line in `README.md` — untrue, there is no mock data
+
 ## Phase 0 — Foundations *(BLOCKING — see PREMORTEM §7)*
 
 - [ ] **OP** Run `supabase_schema.sql` in the Supabase SQL editor
@@ -60,13 +71,6 @@ production writes are destroyed on every restart — PREMORTEM §1.
 ## Phase 6 — Tab 4, Company deep-dive *(BLOCKED on the Phase 0 tracker decision)*
 
 - [ ] **NB** Never render a rating list as complete — state agencies searched, unreachable, and name-match risk (PREMORTEM §5)
-
-## Cleanup — small, do early
-
-- [x] **NB** ~~Write BUILD_PLAN.md~~ (2026-09-28)
-- [x] **NB** ~~Write PREMORTEM.md~~ (2026-09-28)
-- [ ] **NB** Delete `frontend/src/components/MapView.jsx` and its use in `App.jsx` (India map dropped)
-- [ ] **NB** Delete the stale "falls back to mock data" line in `README.md` — untrue, there is no mock data
 
 ---
 
