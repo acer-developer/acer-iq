@@ -48,7 +48,7 @@ PREFERRED_FREE = [
     "google/gemma-4-26b-a4b-it:free",
 ]
 _SKIP = ("safety", "code", "omni", "reasoning", "2.6b", "nano", "mini")
-_MAX_MODELS_PER_CALL = 3
+_MAX_MODELS_PER_CALL = 5   # free models 429 upstream often
 _LIST_TTL = 12 * 3600
 
 _live = {"at": 0.0, "ids": None}
@@ -70,7 +70,9 @@ def _providers() -> list[dict]:
             "url":        OPENROUTER_URL,
             "key":        settings.openrouter_api_key,
             "model":      None,          # chosen per call by _openrouter_models()
-            "min_tokens": 0,
+            # nemotron-3-super thinks before answering and was truncated at the
+            # callers' 512-600 budget (29 Sep 2026, the other two were 429).
+            "min_tokens": 2000,
         })
     if _set(settings.tokenrouter_api_key):
         out.append({
