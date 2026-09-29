@@ -120,9 +120,15 @@ def _ai_status() -> str:
     while this said "ok" (found 2026-09-28)."""
     if not _llm_configured():
         return "no LLM key configured - rule-based scores only"
-    bad = [s for s in source_health.snapshot("AI (") if s["state"] in ("failing", "down")]
+    rows = source_health.snapshot("AI (")
+    # One answering provider means AI works; a dead fallback must not keep it red.
+    if any(s["state"] == "ok" for s in rows):
+        return ""
+    bad = [s for s in rows if s["state"] in ("failing", "down")]
     if bad:
-        return f"configured, but {bad[0]['message']} - rule-based until it recovers"
+        why = " | ".join(f"{s['source']}: {s['last_error']}" for s in bad if s["last_error"])
+        return (f"configured, but {bad[0]['message']} - rule-based until it recovers"
+                + (f" ({why[:400]})" if why else ""))
     return ""
 
 

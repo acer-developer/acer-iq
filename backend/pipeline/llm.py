@@ -129,6 +129,7 @@ async def chat_with_model(prompt: str, max_tokens: int = 600) -> tuple[str | Non
 
     async with httpx.AsyncClient(timeout=60) as client:
         attempts: list[dict] = []
+        why: dict[str, list[str]] = {}      # provider -> reason each model failed
         for p in providers:
             if p["name"] == "OpenRouter":
                 models = choose_models(await _live_free(client),
@@ -156,6 +157,9 @@ async def chat_with_model(prompt: str, max_tokens: int = 600) -> tuple[str | Non
 
                 if isinstance(data, dict) and data.get("error"):
                     log.warning("%s/%s error: %s", p["name"], p["model"], data["error"])
+                    err = data["error"]
+                    msg = err.get("message", err) if isinstance(err, dict) else err
+                    why.setdefault(p["name"], []).append(f"{p['model']}: HTTP {resp.status_code} {msg}"[:140])
                     continue
 
                 choice = (data.get("choices") or [{}])[0]
@@ -166,9 +170,11 @@ async def chat_with_model(prompt: str, max_tokens: int = 600) -> tuple[str | Non
                 if choice.get("finish_reason") == "length" and not text.endswith("}"):
                     log.warning("%s reply truncated at max_tokens - trying next provider",
                                 p["name"])
+                    why.setdefault(p["name"], []).append(f"{p['model']}: truncated")
                     continue
                 if not text:
                     log.warning("%s returned an empty reply", p["name"])
+                    why.setdefault(p["name"], []).append(f"{p['model']}: empty reply (HTTP {resp.status_code})")
                     continue
 
                 last_answer.update(provider=p["name"], model=p["model"],
@@ -178,9 +184,11 @@ async def chat_with_model(prompt: str, max_tokens: int = 600) -> tuple[str | Non
             except Exception as e:
                 log.warning("%s/%s call failed: %s: %s", p["name"], p["model"],
                             type(e).__name__, e)
+                why.setdefault(p["name"], []).append(f"{p['model']}: {type(e).__name__} {e}"[:140])
 
     for name in {p["name"] for p in providers}:
-        source_health.record(f"AI ({name})", False, error="no model answered")
+        source_health.record(f"AI ({name})", False,
+                             error="; ".join(why.get(name, [])) or "no model answered")
     log.warning("all %d LLM attempt(s) failed", len(attempts))
     last_answer.clear()
     return None, ""
