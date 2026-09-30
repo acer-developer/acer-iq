@@ -1,0 +1,422 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "ACER-IQ Architecture",
+    "output": "acer-iq-architecture.html",
+    "quality_profile": "showcase",
+    "repository": {
+      "url": "https://github.com/acer-developer/acer-iq",
+      "revision": "5cfcfe34aa30b2e9e5e51a49804721b79b82cc48"
+    },
+    "views": [
+      {
+        "id": "bd-request",
+        "label": "A BD opens the app",
+        "focus": [
+          "bds",
+          "ui",
+          "auth",
+          "api",
+          "supa"
+        ],
+        "note": "Sign-in on Supabase Auth, then every API call carries the JWT and Postgres RLS scopes rows to that BD."
+      },
+      {
+        "id": "signal",
+        "label": "Market to call list",
+        "focus": [
+          "cra",
+          "markets",
+          "news",
+          "engine",
+          "llm",
+          "bdlist",
+          "supa"
+        ],
+        "note": "Sources feed the signal engine; the monthly list is frozen as a snapshot."
+      },
+      {
+        "id": "always-on",
+        "label": "Keeping it awake",
+        "focus": [
+          "gha",
+          "api",
+          "engine",
+          "supa"
+        ],
+        "note": "GitHub Actions polls every 10 minutes so archives fill with nobody logged in, and emails on degraded health."
+      }
+    ]
+  },
+  "components": [
+    {
+      "id": "bds",
+      "type": "external",
+      "label": "4 BDs + Admin",
+      "sublabel": "Hema, Avinash, Akash, Udit",
+      "pos": [
+        40,
+        300
+      ],
+      "size": [
+        150,
+        64
+      ]
+    },
+    {
+      "id": "auth",
+      "type": "security",
+      "label": "Supabase Auth",
+      "sublabel": "email + password",
+      "pos": [
+        250,
+        110
+      ],
+      "size": [
+        150,
+        64
+      ],
+      "tag": "sign-up off"
+    },
+    {
+      "id": "ui",
+      "type": "frontend",
+      "label": "React UI",
+      "sublabel": "Vite + Tailwind, 8 tabs",
+      "pos": [
+        250,
+        300
+      ],
+      "size": [
+        150,
+        64
+      ],
+      "tag": "Vercel",
+      "sources": [
+        {
+          "path": "frontend/src/App.jsx",
+          "label": "tabs"
+        }
+      ]
+    },
+    {
+      "id": "gha",
+      "type": "cloud",
+      "label": "GitHub Actions",
+      "sublabel": "keepalive, health-alarm, CI",
+      "pos": [
+        480,
+        110
+      ],
+      "size": [
+        160,
+        64
+      ],
+      "sources": [
+        {
+          "path": ".github/workflows/keepalive.yml"
+        },
+        {
+          "path": ".github/workflows/health-alarm.yml"
+        }
+      ]
+    },
+    {
+      "id": "api",
+      "type": "backend",
+      "label": "FastAPI",
+      "sublabel": "/api/*, health, poll",
+      "pos": [
+        480,
+        300
+      ],
+      "size": [
+        160,
+        64
+      ],
+      "tag": "Render",
+      "sources": [
+        {
+          "path": "backend/main.py"
+        }
+      ]
+    },
+    {
+      "id": "engine",
+      "type": "backend",
+      "label": "Signal engine",
+      "sublabel": "macro, winnability, refinance",
+      "pos": [
+        720,
+        300
+      ],
+      "size": [
+        170,
+        64
+      ],
+      "sources": [
+        {
+          "path": "backend/pipeline/macro.py"
+        },
+        {
+          "path": "backend/pipeline/winnability.py"
+        },
+        {
+          "path": "backend/pipeline/refinance.py"
+        }
+      ]
+    },
+    {
+      "id": "llm",
+      "type": "external",
+      "label": "LLM chain",
+      "sublabel": "OpenRouter free, TokenRouter",
+      "pos": [
+        720,
+        110
+      ],
+      "size": [
+        170,
+        64
+      ],
+      "tag": "rule-based fallback",
+      "sources": [
+        {
+          "path": "backend/pipeline/llm.py"
+        }
+      ]
+    },
+    {
+      "id": "bdlist",
+      "type": "backend",
+      "label": "Monthly BD list",
+      "sublabel": "frozen on the 1st",
+      "pos": [
+        720,
+        500
+      ],
+      "size": [
+        170,
+        64
+      ],
+      "sources": [
+        {
+          "path": "backend/pipeline/bd_list.py"
+        },
+        {
+          "path": "backend/data/bd_roster.json"
+        }
+      ]
+    },
+    {
+      "id": "supa",
+      "type": "database",
+      "label": "Supabase Postgres",
+      "sublabel": "leads, bd_lists, archives",
+      "pos": [
+        480,
+        500
+      ],
+      "size": [
+        160,
+        64
+      ],
+      "tag": "RLS, SQLite fallback",
+      "sources": [
+        {
+          "path": "supabase_schema.sql"
+        },
+        {
+          "path": "backend/pipeline/pipeline_store.py"
+        }
+      ]
+    },
+    {
+      "id": "cra",
+      "type": "external",
+      "label": "CRA sites",
+      "sublabel": "Acuite, Brickwork, Ind-Ra, CARE",
+      "pos": [
+        1060,
+        180
+      ],
+      "size": [
+        180,
+        64
+      ],
+      "tag": "3 of 7 blocked",
+      "sources": [
+        {
+          "path": "backend/pipeline/cra_press.py"
+        }
+      ]
+    },
+    {
+      "id": "markets",
+      "type": "external",
+      "label": "BSE / NSE / RBI",
+      "sublabel": "debt scrips, fundamentals",
+      "pos": [
+        1060,
+        300
+      ],
+      "size": [
+        180,
+        64
+      ],
+      "sources": [
+        {
+          "path": "backend/pipeline/bse_scraper.py"
+        },
+        {
+          "path": "backend/pipeline/fundamentals.py"
+        }
+      ]
+    },
+    {
+      "id": "news",
+      "type": "external",
+      "label": "News feeds",
+      "sublabel": "RSS + market news",
+      "pos": [
+        1060,
+        420
+      ],
+      "size": [
+        180,
+        64
+      ],
+      "tag": "major-only, kept",
+      "sources": [
+        {
+          "path": "backend/pipeline/news_archive.py"
+        },
+        {
+          "path": "backend/pipeline/news_classify.py"
+        }
+      ]
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "region",
+      "label": "Render (free dyno)",
+      "wraps": [
+        "api",
+        "engine",
+        "bdlist"
+      ]
+    }
+  ],
+  "connections": [
+    {
+      "id": "bds-ui",
+      "from": "bds",
+      "to": "ui",
+      "label": "HTTPS",
+      "variant": "emphasis"
+    },
+    {
+      "id": "ui-auth",
+      "from": "ui",
+      "to": "auth",
+      "label": "sign in",
+      "variant": "security"
+    },
+    {
+      "id": "ui-api",
+      "from": "ui",
+      "to": "api",
+      "label": "REST + JWT",
+      "variant": "emphasis"
+    },
+    {
+      "id": "gha-api",
+      "from": "gha",
+      "to": "api",
+      "label": "poll every 10 min",
+      "variant": "dashed",
+      "labelDy": 24
+    },
+    {
+      "id": "api-engine",
+      "from": "api",
+      "to": "engine"
+    },
+    {
+      "id": "api-supa",
+      "from": "api",
+      "to": "supa",
+      "label": "rows per BD",
+      "variant": "security",
+      "labelDy": 24
+    },
+    {
+      "id": "engine-llm",
+      "from": "engine",
+      "to": "llm",
+      "label": "fit analysis",
+      "variant": "dashed"
+    },
+    {
+      "id": "cra-engine",
+      "from": "cra",
+      "to": "engine",
+      "label": "rating actions"
+    },
+    {
+      "id": "markets-engine",
+      "from": "markets",
+      "to": "engine",
+      "label": "debt, maturity",
+      "labelDx": 44
+    },
+    {
+      "id": "news-engine",
+      "from": "news",
+      "to": "engine",
+      "label": "events"
+    },
+    {
+      "id": "engine-bdlist",
+      "from": "engine",
+      "to": "bdlist",
+      "label": "rank",
+      "labelDy": 24
+    },
+    {
+      "id": "bdlist-supa",
+      "from": "bdlist",
+      "to": "supa",
+      "label": "snapshot"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "Built (Phases 0-4)",
+      "items": [
+        "Login + per-BD pipelines",
+        "Durable news + CRA archives",
+        "Macro tab, News kept, monthly BD list"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "Next",
+      "items": [
+        "Phase 5: FreeLLMAPI provider",
+        "Phase 6: Company deep-dive, blocked on tracker decision"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "Known limits",
+      "items": [
+        "CRISIL, ICRA, Infomerics unreadable",
+        "Free AI models rate-limit often"
+      ]
+    }
+  ]
+}
